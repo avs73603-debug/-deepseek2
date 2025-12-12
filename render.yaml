@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: deepseek2jc
+    env: python
+    plan: free
+    buildCommand: |
+      cd streamlit
+      pip install --upgrade pip
+      pip install -r requirements.txt
+    startCommand: |
+      cd streamlit
+      streamlit run app.py --server.port=$PORT --server.address=0.0.0.0 --server.headless=true

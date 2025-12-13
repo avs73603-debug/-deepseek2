@@ -76,6 +76,7 @@ DEEPSEEK_CLIENT = get_deepseek_client()
 @st.cache_data(ttl=4*3600)
 @st.cache_data(ttl=4*3600)
 @st.cache_data(ttl=4*3600)
+@st.cache_data(ttl=4*3600)
 def get_all_stocks():
     """
     获取全A股票池 - 双数据源备份策略
@@ -1133,6 +1134,7 @@ def main():
 # ============================================================
 if __name__ == "__main__":
     main()
+
 
 
 

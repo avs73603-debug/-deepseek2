@@ -77,10 +77,13 @@ DEEPSEEK_CLIENT = get_deepseek_client()
 @st.cache_data(ttl=4*3600)
 @st.cache_data(ttl=4*3600)
 @st.cache_data(ttl=4*3600)
+@st.cache_data(ttl=4*3600)
 def get_all_stocks():
     """
-    获取全A股票池 - 双数据源备份策略
-    优先尝试新浪接口，失败则尝试东方财富接口
+    获取全A股票池 - 增强容错版
+    1. 打印数据源列名用于调试
+    2. 更灵活的字段映射
+    3. 确保必需列100%存在
     """
     max_retries = 2
     data_sources = [
@@ -94,69 +97,94 @@ def get_all_stocks():
                 st.info(f"正在从【{source['name']}】接口获取数据，尝试第{attempt+1}次...")
                 df = source['func']()
                 
-                # 新浪接口字段名可能不同，需要适配
-                if source['name'] == "新浪":
-                    # 新浪接口的字段映射
-                    df = df.rename(columns={
-                        'symbol': 'code',
-                        'name': 'name',
-                        'trade': 'price',
-                        'pricechange': 'change',
-                        'changepercent': 'pct_chg',
-                        'turnoverratio': 'turnover',
-                        'volume': 'volume',
-                        'amount': 'amount'
-                    })
-                    # 新浪没有直接提供量比，给默认值
-                    df['volume_ratio'] = 1.0
-                else:
-                    # 东方财富接口字段映射
-                    df = df.rename(columns={
-                        '代码': 'code',
-                        '名称': 'name',
-                        '最新价': 'price',
-                        '涨跌幅': 'pct_chg',
-                        '换手率': 'turnover',
-                        '量比': 'volume_ratio',
-                        '流通市值': 'float_mv',
-                        '总市值': 'total_mv',
-                        '市盈率-动态': 'pe_ttm',
-                        '市净率': 'pb'
-                    })
+                # 调试信息：打印前查看列名
+                if attempt == 0:  # 只打印第一次尝试
+                    st.write(f"【{source['name']}】接口原始列名:", list(df.columns)[:10])
                 
-                # ====== 【关键修复】补全后续代码所必需的列 ======
-                # 定义所有后续操作（筛选、打分）所必需的列及其默认值
+                # 根据数据源进行字段映射
+                if source['name'] == "新浪":
+                    # 新浪接口：先创建空列，再尝试映射
+                    column_mapping = {}
+                    if 'symbol' in df.columns:
+                        column_mapping['symbol'] = 'code'
+                    if 'name' in df.columns:
+                        column_mapping['name'] = 'name'
+                    elif '名称' in df.columns:
+                        column_mapping['名称'] = 'name'
+                    if 'trade' in df.columns:
+                        column_mapping['trade'] = 'price'
+                    if 'changepercent' in df.columns:
+                        column_mapping['changepercent'] = 'pct_chg'
+                    if 'turnoverratio' in df.columns:
+                        column_mapping['turnoverratio'] = 'turnover'
+                    
+                    if column_mapping:
+                        df = df.rename(columns=column_mapping)
+                else:
+                    # 东方财富接口
+                    column_mapping = {}
+                    if '代码' in df.columns:
+                        column_mapping['代码'] = 'code'
+                    if '名称' in df.columns:
+                        column_mapping['名称'] = 'name'
+                    if '最新价' in df.columns:
+                        column_mapping['最新价'] = 'price'
+                    if '涨跌幅' in df.columns:
+                        column_mapping['涨跌幅'] = 'pct_chg'
+                    if '换手率' in df.columns:
+                        column_mapping['换手率'] = 'turnover'
+                    if '量比' in df.columns:
+                        column_mapping['量比'] = 'volume_ratio'
+                    if '流通市值' in df.columns:
+                        column_mapping['流通市值'] = 'float_mv'
+                    if '总市值' in df.columns:
+                        column_mapping['总市值'] = 'total_mv'
+                    if '市盈率-动态' in df.columns:
+                        column_mapping['市盈率-动态'] = 'pe_ttm'
+                    if '市净率' in df.columns:
+                        column_mapping['市净率'] = 'pb'
+                    
+                    if column_mapping:
+                        df = df.rename(columns=column_mapping)
+                
+                # ====== 【核心修复】确保所有必需列都存在 ======
                 required_columns = {
-                    'float_mv': 0.0,   # 流通市值，用于市值筛选
-                    'total_mv': 0.0,   # 总市值
-                    'pe_ttm': 0.0,     # 市盈率，用于估值筛选
-                    'pb': 0.0,         # 市净率，用于估值筛选
-                    'volume_ratio': 1.0, # 量比
-                    'turnover': 0.0,   # 换手率
-                    'pct_5d': 0.0      # 近5日涨幅，打分所需
+                    'code': 'Unknown',
+                    'name': 'Unknown',
+                    'price': 0.0,
+                    'pct_chg': 0.0,
+                    'turnover': 0.0,
+                    'volume_ratio': 1.0,
+                    'float_mv': 0.0,
+                    'total_mv': 0.0,
+                    'pe_ttm': 0.0,
+                    'pb': 0.0,
+                    'pct_5d': 0.0
                 }
                 
                 for col, default_val in required_columns.items():
                     if col not in df.columns:
                         df[col] = default_val
+                        st.warning(f"⚠️ 自动补全缺失列: {col}")
                 # ====== 修复结束 ======
                 
                 st.success(f"✅ 成功从【{source['name']}】接口获取{len(df)}条数据")
                 return df
                 
             except Exception as e:
+                error_msg = str(e)[:100]
                 if attempt < max_retries - 1:
                     time_module.sleep(1)
                     continue
                 else:
-                    st.warning(f"⚠️ 【{source['name']}】接口尝试失败: {str(e)[:50]}...")
+                    st.warning(f"⚠️ 【{source['name']}】接口尝试失败: {error_msg}...")
     
-    # 所有数据源都失败时，返回带结构的安全空DataFrame
-    st.error("❌ 实时数据源暂时不可用，请稍后刷新页面重试。")
+    # 所有数据源都失败时，返回带完整结构的空DataFrame
+    st.error("❌ 所有数据源均不可用。请稍后刷新或检查网络。")
     safety_columns = ['code', 'name', 'price', 'pct_chg', 'turnover', 
                      'volume_ratio', 'float_mv', 'total_mv', 'pe_ttm', 'pb', 'pct_5d']
     return pd.DataFrame(columns=safety_columns)
-
+                
 @st.cache_data(ttl=300)
 def get_minute_kline(symbol, days=1):
     """
@@ -1134,6 +1162,7 @@ def main():
 # ============================================================
 if __name__ == "__main__":
     main()
+
 
 
 

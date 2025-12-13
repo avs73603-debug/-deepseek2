@@ -571,4 +571,312 @@ def generate_pdf_report(top10_df):
 #       → 左侧滑块自动更新
 # ============================================================
 def ai_parse_command(user_input, current_filters):
+"""
+    处理用户与AI助手的对话
+    user_message: 用户输入的消息
+    top10_data: 当前Top10股票数据（JSON格式）
+    current_filters: 当前筛选条件（JSON格式）
+    返回：AI的回复文本
+    
+    限流逻辑：
+    - 使用session_state记录最近1分钟的调用时间戳
+    - 超过3次则拒绝调用，提示用户稍后再试
+    """
+    if not DEEPSEEK_CLIENT:
+        return "❌ DeepSeek API未配置，请在设置中添加API密钥"
+    
+    # 限流检查：每分钟最多3次调用
+    now = time_module.time()
+    if 'ai_call_times' not in st.session_state:
+        st.session_state.ai_call_times = []
+    
+    # 清理1分钟前的调用记录
+    st.session_state.ai_call_times = [
+        t for t in st.session_state.ai_call_times 
+        if now - t < 60
+    ]
+    
+    # 检查是否超过限制
+    if len(st.session_state.ai_call_times) >= 3:
+        return "⏱️ 调用频率过高，请1分钟后再试（限流保护：每分钟3次）"
+    
+    # 记录本次调用时间
+    st.session_state.ai_call_times.append(now)
+    
+    # 构造System Prompt（定义AI的角色和行为准则）
+    system_prompt = f"""你是专业A股投研助手，当前实时数据如下：
 
+【当前Top10股票】
+{top10_data}
+
+【当前筛选条件】
+{json.dumps(current_filters, ensure_ascii=False, indent=2)}
+
+【行为准则】
+1. 只基于上述实时数据回答问题，不编造信息
+2. 涉及个股时必须引用具体数据（价格、涨幅、评分等）
+3. 永远提示"股市有风险，投资需谨慎"
+4. 严禁预测明天涨跌，只能分析当前技术面
+5. 如果用户问题超出数据范围，坦诚告知并建议使用筛选功能
+6. 回答简洁专业，每次不超过150字
+
+当前时间：{datetime.now(TZ).strftime('%Y-%m-%d %H:%M')}"""
+    
+    try:
+        # 获取对话历史（支持多轮对话）
+        if 'ai_chat_history' not in st.session_state:
+            st.session_state.ai_chat_history = []
+        
+        # 构造消息列表（包含历史对话）
+        messages = [{"role": "system", "content": system_prompt}]
+        messages.extend(st.session_state.ai_chat_history)
+        messages.append({"role": "user", "content": user_message})
+        
+        # 调用DeepSeek API
+        response = DEEPSEEK_CLIENT.chat.completions.create(
+            model="deepseek-chat",
+            messages=messages,
+            max_tokens=300,
+            temperature=0.7
+        )
+        
+        ai_reply = response.choices[0].message.content
+        
+        # 保存对话历史（最多保留最近10轮）
+        st.session_state.ai_chat_history.append({"role": "user", "content": user_message})
+        st.session_state.ai_chat_history.append({"role": "assistant", "content": ai_reply})
+        
+        # 限制历史长度，避免上下文过长
+        if len(st.session_state.ai_chat_history) > 20:
+            st.session_state.ai_chat_history = st.session_state.ai_chat_history[-20:]
+        
+        return ai_reply
+    
+    except Exception as e:
+        return f"❌ AI调用失败：{str(e)}"
+
+# ============================================================
+# 主程序入口：页面渲染与逻辑控制
+# 分为两个Tab：
+# Tab1 - 智能选股：实时数据、筛选、推荐、K线图
+# Tab2 - AI智能助手：自然对话 + 修改筛选条件
+# ============================================================
+def main():
+    """主程序：协调各模块，渲染完整页面"""
+    
+    # 页面标题
+    st.title("📈 DeepSeek量化投研终端")
+    st.caption("🚀 AI驱动的A股智能选股系统 | 实时数据 + 多因子模型 + 自然语言交互")
+    
+    # 渲染侧边栏筛选器
+    filters = render_sidebar_filters()
+    
+    # 获取全A股数据
+    with st.spinner("🔄 加载全A股数据..."):
+        all_stocks = get_all_stocks()
+    
+    if all_stocks.empty:
+        st.error("❌ 数据加载失败，请检查网络或稍后重试")
+        return
+    
+    # 获取北向资金数据
+    north_df = get_north_flow()
+    north_symbols = set(north_df['代码'].tolist()) if not north_df.empty else set()
+    
+    # 执行筛选与打分
+    filtered_df = filter_and_score(all_stocks, filters, north_symbols)
+    
+    # 创建Tab页
+    tab1, tab2 = st.tabs(["🎯 智能选股", "🤖 AI智能助手"])
+    
+    # ========== Tab1: 智能选股 ==========
+    with tab1:
+        # 显示筛选结果统计
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("全市场股票数", f"{len(all_stocks)}")
+        with col2:
+            st.metric("筛选后数量", f"{len(filtered_df)}")
+        with col3:
+            trading_status = "🟢 交易中" if is_trading_time() else "🔴 休市"
+            st.metric("市场状态", trading_status)
+        with col4:
+            st.metric("更新时间", datetime.now(TZ).strftime("%H:%M:%S"))
+        
+        if len(filtered_df) == 0:
+            st.warning("⚠️ 当前筛选条件下无符合标的，请调整筛选器")
+            return
+        
+        # 获取Top15用于AI生成推荐理由
+        top15 = filtered_df.head(15).copy()
+        top15_json = top15[['code', 'name', 'price', 'pct_chg', 'score']].to_json(
+            orient='records', force_ascii=False
+        )
+        
+        # 调用AI生成推荐理由
+        with st.spinner("🤖 AI正在生成推荐理由..."):
+            ai_reasons = generate_ai_reasons(top15_json)
+        
+        # 最终Top10展示
+        top10 = filtered_df.head(10).copy()
+        top10['推荐理由'] = top10['code'].map(ai_reasons).fillna('技术面向好')
+        
+        st.subheader("🏆 今日潜力Top10")
+        
+        # 展示每只股票的详细信息 + K线图
+        for idx, row in top10.iterrows():
+            # 跌停标红处理
+            border_color = "red" if row.get('is_limit_down', False) else "#e0e0e0"
+            
+            with st.container():
+                st.markdown(f"""
+                <div style="border: 2px solid {border_color}; padding: 15px; border-radius: 10px; margin-bottom: 20px;">
+                """, unsafe_allow_html=True)
+                
+                # 股票基本信息
+                col_info, col_chart = st.columns([1, 2])
+                
+                with col_info:
+                    st.markdown(f"### {row['name']} ({row['code']})")
+                    st.metric("最新价", f"¥{row['price']:.2f}", f"{row['pct_chg']:.2f}%")
+                    st.metric("综合评分", f"{row['score']:.1f}分")
+                    st.info(f"💡 {row['推荐理由']}")
+                    
+                    # 详细指标
+                    st.markdown("---")
+                    st.text(f"换手率: {row['turnover']:.2f}%")
+                    st.text(f"量比: {row['volume_ratio']:.2f}")
+                    st.text(f"流通市值: {row['float_mv']/100000000:.2f}亿")
+                    st.text(f"PE(TTM): {row['pe_ttm']:.2f}")
+                
+                with col_chart:
+                    # 绘制K线图
+                    fig = plot_kline(row['code'], row['name'])
+                    st.plotly_chart(fig, use_container_width=True)
+                
+                st.markdown("</div>", unsafe_allow_html=True)
+        
+        # PDF报告生成按钮（仅收盘后显示）
+        now = datetime.now(TZ)
+        if now.time() >= time(15, 5):
+            if st.button("📄 生成今日报告PDF"):
+                with st.spinner("📝 正在生成PDF报告..."):
+                    pdf_bytes = generate_pdf_report(top10)
+                    st.download_button(
+                        label="⬇️ 下载《今日潜力股报告.pdf》",
+                        data=pdf_bytes,
+                        file_name=f"潜力股报告_{datetime.now(TZ).strftime('%Y%m%d')}.pdf",
+                        mime="application/pdf"
+                    )
+    
+    # ========== Tab2: AI智能助手 ==========
+    with tab2:
+        st.subheader("🤖 DeepSeek AI投研助手")
+        st.caption("💬 支持自然对话 + 智能修改筛选条件 | 每分钟最多3次调用")
+        
+        # 准备注入上下文的数据
+        top10_context = top10[['code', 'name', 'price', 'pct_chg', 'score', '推荐理由']].to_json(
+            orient='records', force_ascii=False
+        )
+        
+        # 显示当前筛选条件（方便用户了解上下文）
+        with st.expander("📊 当前筛选条件（AI可见）"):
+            st.json(filters)
+        
+        # 聊天历史显示
+        if 'ai_chat_history' not in st.session_state:
+            st.session_state.ai_chat_history = []
+        
+        # 显示历史对话
+        chat_container = st.container()
+        with chat_container:
+            for msg in st.session_state.ai_chat_history:
+                if msg['role'] == 'user':
+                    st.markdown(f"**👤 您：** {msg['content']}")
+                else:
+                    st.markdown(f"**🤖 AI：** {msg['content']}")
+        
+        # 用户输入框（固定底部）
+        st.markdown("---")
+        user_input = st.text_input(
+            "💬 输入您的问题或指令",
+            placeholder="例如：第一只股票怎么样？ / 把ROE改成大于20% / 加个芯片概念",
+            key="ai_input"
+        )
+        
+        col_send, col_clear, col_modify = st.columns([1, 1, 1])
+        
+        with col_send:
+            if st.button("📤 发送", use_container_width=True):
+                if user_input.strip():
+                    # 判断是否为修改筛选条件的指令
+                    modify_keywords = ['改', '修改', '调整', '设置', '加上', '去掉', '剔除']
+                    is_modify_command = any(kw in user_input for kw in modify_keywords)
+                    
+                    if is_modify_command:
+                        # 调用AI解析指令
+                        with st.spinner("🔧 AI正在解析您的指令..."):
+                            result = ai_parse_command(user_input, filters)
+                        
+                        if result['success']:
+                            st.success(result['message'])
+                            st.rerun()  # 重新渲染页面以更新筛选器
+                        else:
+                            st.error(result['message'])
+                    else:
+                        # 普通对话
+                        with st.spinner("🤔 AI正在思考..."):
+                            ai_reply = ai_chat_response(user_input, top10_context, filters)
+                        st.rerun()  # 刷新显示新对话
+        
+        with col_clear:
+            if st.button("🗑️ 清空对话", use_container_width=True):
+                st.session_state.ai_chat_history = []
+                st.session_state.ai_call_times = []
+                st.rerun()
+        
+        with col_modify:
+            st.markdown("💡 **快捷指令示例**")
+        
+        # 快捷指令按钮
+        st.markdown("---")
+        st.caption("⚡ 一键快捷指令")
+        quick_col1, quick_col2, quick_col3 = st.columns(3)
+        
+        with quick_col1:
+            if st.button("🔥 推荐一只高分股票"):
+                user_input_quick = "推荐一只综合评分最高的股票，详细分析其优势"
+                with st.spinner("🤔 AI正在分析..."):
+                    ai_reply = ai_chat_response(user_input_quick, top10_context, filters)
+                st.rerun()
+    
+    # ========== 自动刷新逻辑 ==========
+    st.markdown("---")
+    refresh_interval = 5 if is_trading_time() else 30
+    st.caption(f"🔄 自动刷新：{refresh_interval}秒 | 交易时段5秒，非交易时段30秒")
+    
+    # 倒计时显示
+    if 'last_refresh' not in st.session_state:
+        st.session_state.last_refresh = time_module.time()
+    
+    elapsed = int(time_module.time() - st.session_state.last_refresh)
+    remaining = max(0, refresh_interval - elapsed)
+    
+    progress_bar = st.progress(remaining / refresh_interval)
+    countdown_text = st.empty()
+    countdown_text.text(f"⏱️ 下次刷新倒计时: {remaining}秒")
+    
+    # 自动刷新触发
+    if remaining == 0:
+        st.session_state.last_refresh = time_module.time()
+        st.rerun()
+    
+    # 使用JavaScript实现精确倒计时（可选，提升用户体验）
+    time_module.sleep(1)
+    st.rerun()
+
+# ============================================================
+# 程序入口
+# ============================================================
+if __name__ == "__main__":
+    main()

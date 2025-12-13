@@ -570,4 +570,5 @@ def generate_pdf_report(top10_df):
 #       → 代码执行 st.session_state.mv_range = [50, 300]
 #       → 左侧滑块自动更新
 # ============================================================
-def ai_parse_command(user_input, current_filters
+def ai_parse_command(user_input, current_filters):
+

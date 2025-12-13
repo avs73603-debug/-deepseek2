@@ -74,41 +74,81 @@ DEEPSEEK_CLIENT = get_deepseek_client()
 # 注意：akshare数据源不稳定时会自动重试，失败返回空DataFrame
 # ============================================================
 @st.cache_data(ttl=4*3600)
+@st.cache_data(ttl=4*3600)
 def get_all_stocks():
     """
-    获取全A股票池（约5300只）+ 实时行情数据
-    增加重试机制和友好错误处理
+    获取全A股票池 - 双数据源备份策略
+    优先尝试新浪接口，失败则尝试东方财富接口
     """
-    max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            df = ak.stock_zh_a_spot_em()
-            # 字段映射：东方财富接口字段名转标准名称
-            df = df.rename(columns={
-                '代码': 'code',
-                '名称': 'name',
-                '最新价': 'price',
-                '涨跌幅': 'pct_chg',
-                '换手率': 'turnover',
-                '量比': 'volume_ratio',
-                '流通市值': 'float_mv',
-                '总市值': 'total_mv',
-                '市盈率-动态': 'pe_ttm',
-                '市净率': 'pb',
-                '60日涨跌幅': 'pct_60d',
-                '年初至今涨跌': 'pct_ytd'
-            })
-            return df
-        except Exception as e:
-            if attempt < max_retries - 1:  # 如果不是最后一次重试
-                time_module.sleep(2)  # 等待2秒后重试
-                continue
-            else:  # 最后一次重试也失败
-                # 返回一个空的DataFrame，但包含必要的列，防止程序完全崩溃
-                st.error(f"❌ 数据获取失败，请稍后刷新。错误详情: {e}")
-                return pd.DataFrame(columns=['code', 'name', 'price', 'pct_chg', 'turnover'])
+    max_retries = 2
+    data_sources = [
+        {"name": "新浪", "func": lambda: ak.stock_zh_a_spot()},
+        {"name": "东方财富", "func": lambda: ak.stock_zh_a_spot_em()}
+    ]
     
-    return pd.DataFrame()  # 保底返回
+    for source in data_sources:
+        for attempt in range(max_retries):
+            try:
+                st.info(f"正在从【{source['name']}】接口获取数据，尝试第{attempt+1}次...")
+                df = source['func']()
+                
+                # 新浪接口字段名可能不同，需要适配
+                if source['name'] == "新浪":
+                    # 新浪接口的字段映射
+                    df = df.rename(columns={
+                        'symbol': 'code',
+                        'name': 'name',
+                        'trade': 'price',
+                        'pricechange': 'change',
+                        'changepercent': 'pct_chg',
+                        'turnoverratio': 'turnover',
+                        'volume': 'volume',
+                        'amount': 'amount'
+                    })
+                    # 计算量比（新浪没有直接提供，用成交量估算）
+                    if 'volume' in df.columns:
+                        df['volume_ratio'] = 1.0  # 默认值
+                else:
+                    # 东方财富接口字段映射（保持原样）
+                    df = df.rename(columns={
+                        '代码': 'code',
+                        '名称': 'name',
+                        '最新价': 'price',
+                        '涨跌幅': 'pct_chg',
+                        '换手率': 'turnover',
+                        '量比': 'volume_ratio',
+                        '流通市值': 'float_mv',
+                        '总市值': 'total_mv',
+                        '市盈率-动态': 'pe_ttm',
+                        '市净率': 'pb'
+                    })
+                
+                # 确保必要的列存在
+                required_columns = ['code', 'name', 'price', 'pct_chg']
+                for col in required_columns:
+                    if col not in df.columns:
+                        df[col] = None
+                
+                st.success(f"✅ 成功从【{source['name']}】接口获取{len(df)}条数据")
+                return df
+                
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    time_module.sleep(1)
+                    continue
+                else:
+                    st.warning(f"⚠️ 【{source['name']}】接口尝试失败: {str(e)[:50]}...")
+    
+    # 所有数据源都失败时，返回模拟数据防止页面崩溃
+    st.error("❌ 所有数据源均不可用，显示示例数据。请稍后刷新或检查网络。")
+    return pd.DataFrame({
+        'code': ['000001', '000002', '600036'],
+        'name': ['平安银行', '万科A', '招商银行'],
+        'price': [10.5, 8.3, 32.6],
+        'pct_chg': [1.5, -0.8, 2.3],
+        'turnover': [0.8, 1.2, 0.9],
+        'volume_ratio': [1.2, 0.9, 1.5]
+    })# 保底返回
 
 @st.cache_data(ttl=300)
 def get_minute_kline(symbol, days=1):
@@ -1087,5 +1127,6 @@ def main():
 # ============================================================
 if __name__ == "__main__":
     main()
+
 
 

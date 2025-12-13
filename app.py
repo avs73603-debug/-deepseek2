@@ -571,7 +571,183 @@ def generate_pdf_report(top10_df):
 #       → 左侧滑块自动更新
 # ============================================================
 def ai_parse_command(user_input, current_filters):
-"""
+    """
+    AI解析用户自然语言指令，返回筛选条件修改指令
+    这是整个AI助手最核心的函数！负责将自然语言转换为可执行的代码操作
+    
+    工作流程：
+    1. 接收用户输入（如"把ROE改成大于20%"、"加上芯片概念"）
+    2. 将当前筛选条件JSON化，连同用户输入一起发送给DeepSeek
+    3. DeepSeek按照System Prompt要求，返回结构化JSON指令
+    4. 解析JSON，执行对应的session_state修改操作
+    
+    JSON指令格式示例：
+    {
+        "action": "modify",  // 动作类型：modify修改/add增加/remove删除
+        "param": "mv_range",  // 要修改的参数名（对应session_state键）
+        "value": [50, 300],   // 新值（支持数字、列表、布尔）
+        "message": "已将流通市值调整为50-300亿"  // 反馈给用户的文字
+    }
+    
+    参数映射表（自然语言 → session_state键）：
+    - "市值"/"流通市值" → mv_range
+    - "股价"/"价格" → price_range
+    - "涨跌幅"/"涨幅" → pct_range
+    - "换手率" → turnover_range
+    - "量比" → volume_ratio_min
+    - "PE"/"市盈率" → pe_range
+    - "PB"/"市净率" → pb_range
+    - "ROE"/"净资产收益率" → roe_min
+    - "近5日涨幅" → pct_5d_min
+    - "新高" → near_high_20d
+    - "ST股" → exclude_st
+    
+    异常处理：
+    - API调用失败 → 返回友好错误提示
+    - JSON解析失败 → 返回"无法理解指令"
+    - 参数名不存在 → 返回"不支持该筛选条件"
+    """
+    if not DEEPSEEK_CLIENT:
+        return {"success": False, "message": "❌ DeepSeek API未配置，请在secrets.toml中添加DEEPSEEK_API_KEY"}
+    
+    # 构造给AI的System Prompt（定义AI的行为规范和输出格式）
+    system_prompt = """你是A股智能投研助手的指令解析器。用户会说自然语言来修改筛选条件，你需要将其转换为JSON指令。
+
+可修改的参数及格式：
+1. mv_range: 流通市值范围[最小值, 最大值]，单位亿
+2. price_range: 股价区间[最小值, 最大值]，单位元
+3. pct_range: 今日涨跌幅[最小值, 最大值]，单位%
+4. turnover_range: 换手率[最小值, 最大值]，单位%
+5. volume_ratio_min: 量比最小值，数字
+6. pe_range: PE区间[最小值, 最大值]
+7. pb_range: PB区间[最小值, 最大值]
+8. roe_min: ROE最小值，单位%
+9. pct_5d_min: 近5日涨幅最小值，单位%
+10. near_high_20d: 是否仅显示近20日新高，布尔值
+11. exclude_st: 是否剔除ST股，布尔值
+
+返回JSON格式（必须严格遵守）：
+{
+    "action": "modify",
+    "param": "参数名",
+    "value": 新值,
+    "message": "人性化反馈（30字内）"
+}
+
+如果用户意图不明确或无法解析，返回：
+{
+    "action": "error",
+    "message": "无法理解指令，请换个说法"
+}"""
+    try:
+        # 调用DeepSeek API进行自然语言理解
+        response = DEEPSEEK_CLIENT.chat.completions.create(
+            model="deepseek-chat",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {
+                    "role": "user",
+                    "content": f"当前筛选条件：{json.dumps(current_filters, ensure_ascii=False)}\n\n用户指令：{user_input}\n\n请解析为JSON指令："
+                }
+            ],
+            max_tokens=200,
+            temperature=0.3  # 低温度保证输出稳定
+        )
+        
+        # 提取AI返回的内容
+        ai_response = response.choices[0].message.content.strip()
+        
+        # 清理可能的Markdown代码块标记
+        if ai_response.startswith('```'):
+            ai_response = ai_response.split('\n', 1)[1]
+        if ai_response.endswith('```'):
+            ai_response = ai_response.rsplit('\n', 1)[0]
+        
+        # 解析JSON指令
+        command = json.loads(ai_response)
+        
+        # 执行指令：修改session_state
+        if command.get('action') == 'modify':
+            param = command.get('param')
+            value = command.get('value')
+            
+            # 验证参数名是否合法
+            valid_params = [
+                'mv_range', 'price_range', 'pct_range', 'turnover_range',
+                'volume_ratio_min', 'pe_range', 'pb_range', 'roe_min',
+                'pct_5d_min', 'near_high_20d', 'exclude_st'
+            ]
+            
+            if param not in valid_params:
+                return {
+                    "success": False,
+                    "message": f"❌ 不支持修改参数'{param}'，请检查指令"
+                }
+            
+            # 类型转换与校验
+            try:
+                if param in ['mv_range', 'price_range', 'pct_range', 'turnover_range', 'pe_range', 'pb_range']:
+                    # 范围类参数：必须是长度为2的列表
+                    if not isinstance(value, list) or len(value) != 2:
+                        raise ValueError("范围参数需要[最小值, 最大值]格式")
+                    value = [float(value[0]), float(value[1])]
+                
+                elif param in ['volume_ratio_min', 'roe_min', 'pct_5d_min']:
+                    # 数值类参数
+                    value = float(value)
+                
+                elif param in ['near_high_20d', 'exclude_st']:
+                    # 布尔类参数
+                    value = bool(value)
+                
+                # 更新session_state（这是关键！修改后Streamlit会自动重新渲染页面）
+                st.session_state[param] = value
+                
+                return {
+                    "success": True,
+                    "message": f"✅ {command.get('message', '筛选条件已更新')}"
+                }
+                
+            except Exception as e:
+                return {
+                    "success": False,
+                    "message": f"❌ 参数值格式错误：{str(e)}"
+                }
+        
+        elif command.get('action') == 'error':
+            return {
+                "success": False,
+                "message": command.get('message', '❌ 无法理解您的指令')
+            }
+        
+        else:
+            return {
+                "success": False,
+                "message": "❌ AI返回了未知指令类型"
+            }
+    
+    except json.JSONDecodeError:
+        return {
+            "success": False,
+            "message": "❌ AI返回格式错误，请重新描述您的需求"
+        }
+    
+    except Exception as e:
+        return {
+            "success": False,
+            "message": f"❌ AI解析失败：{str(e)}"
+        }
+
+# ============================================================
+# AI聊天助手：支持上下文对话 + 实时数据注入
+# 功能亮点：
+# 1. 自动将Top10股票数据注入每次对话的上下文
+# 2. 用户可以问"第一只股票怎么样"，AI能看到完整数据
+# 3. 限流保护：每分钟最多3次API调用
+# 4. 对话历史存储在session_state，支持多轮对话
+# ============================================================
+def ai_chat_response(user_message, top10_data, current_filters):
+    """
     处理用户与AI助手的对话
     user_message: 用户输入的消息
     top10_data: 当前Top10股票数据（JSON格式）
@@ -849,6 +1025,20 @@ def main():
                 with st.spinner("🤔 AI正在分析..."):
                     ai_reply = ai_chat_response(user_input_quick, top10_context, filters)
                 st.rerun()
+        
+        with quick_col2:
+            if st.button("📈 分析市场热点"):
+                user_input_quick = "分析当前Top10股票的共同特征和市场热点"
+                with st.spinner("🤔 AI正在分析..."):
+                    ai_reply = ai_chat_response(user_input_quick, top10_context, filters)
+                st.rerun()
+        
+        with quick_col3:
+            if st.button("⚠️ 风险提示"):
+                user_input_quick = "对Top10股票进行风险评估，指出潜在风险"
+                with st.spinner("🤔 AI正在分析..."):
+                    ai_reply = ai_chat_response(user_input_quick, top10_context, filters)
+                st.rerun()
     
     # ========== 自动刷新逻辑 ==========
     st.markdown("---")
@@ -874,7 +1064,6 @@ def main():
     # 使用JavaScript实现精确倒计时（可选，提升用户体验）
     time_module.sleep(1)
     st.rerun()
-
 # ============================================================
 # 程序入口
 # ============================================================

@@ -20,6 +20,11 @@ from fpdf import FPDF
 import io
 import base64
 
+# 强制设置环境变量（用于Render部署）
+import os
+if 'DEEPSEEK_API_KEY' not in os.environ:
+    # 将下面的 'sk-你的真实API密钥' 替换为你从DeepSeek官网获取的真实密钥
+    os.environ['DEEPSEEK_API_KEY'] = 'sk-你的真实API密钥'
 # ============================================================
 # 全局配置：页面布局、样式、时区、API客户端初始化
 # 必须放在最前面，避免Streamlit警告。设置宽屏模式以充分利用屏幕空间
@@ -1069,3 +1074,4 @@ def main():
 # ============================================================
 if __name__ == "__main__":
     main()
+

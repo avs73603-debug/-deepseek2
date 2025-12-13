@@ -75,6 +75,7 @@ DEEPSEEK_CLIENT = get_deepseek_client()
 # ============================================================
 @st.cache_data(ttl=4*3600)
 @st.cache_data(ttl=4*3600)
+@st.cache_data(ttl=4*3600)
 def get_all_stocks():
     """
     获取全A股票池 - 双数据源备份策略
@@ -105,11 +106,10 @@ def get_all_stocks():
                         'volume': 'volume',
                         'amount': 'amount'
                     })
-                    # 计算量比（新浪没有直接提供，用成交量估算）
-                    if 'volume' in df.columns:
-                        df['volume_ratio'] = 1.0  # 默认值
+                    # 新浪没有直接提供量比，给默认值
+                    df['volume_ratio'] = 1.0
                 else:
-                    # 东方财富接口字段映射（保持原样）
+                    # 东方财富接口字段映射
                     df = df.rename(columns={
                         '代码': 'code',
                         '名称': 'name',
@@ -123,11 +123,22 @@ def get_all_stocks():
                         '市净率': 'pb'
                     })
                 
-                # 确保必要的列存在
-                required_columns = ['code', 'name', 'price', 'pct_chg']
-                for col in required_columns:
+                # ====== 【关键修复】补全后续代码所必需的列 ======
+                # 定义所有后续操作（筛选、打分）所必需的列及其默认值
+                required_columns = {
+                    'float_mv': 0.0,   # 流通市值，用于市值筛选
+                    'total_mv': 0.0,   # 总市值
+                    'pe_ttm': 0.0,     # 市盈率，用于估值筛选
+                    'pb': 0.0,         # 市净率，用于估值筛选
+                    'volume_ratio': 1.0, # 量比
+                    'turnover': 0.0,   # 换手率
+                    'pct_5d': 0.0      # 近5日涨幅，打分所需
+                }
+                
+                for col, default_val in required_columns.items():
                     if col not in df.columns:
-                        df[col] = None
+                        df[col] = default_val
+                # ====== 修复结束 ======
                 
                 st.success(f"✅ 成功从【{source['name']}】接口获取{len(df)}条数据")
                 return df
@@ -139,16 +150,11 @@ def get_all_stocks():
                 else:
                     st.warning(f"⚠️ 【{source['name']}】接口尝试失败: {str(e)[:50]}...")
     
-    # 所有数据源都失败时，返回模拟数据防止页面崩溃
-    st.error("❌ 所有数据源均不可用，显示示例数据。请稍后刷新或检查网络。")
-    return pd.DataFrame({
-        'code': ['000001', '000002', '600036'],
-        'name': ['平安银行', '万科A', '招商银行'],
-        'price': [10.5, 8.3, 32.6],
-        'pct_chg': [1.5, -0.8, 2.3],
-        'turnover': [0.8, 1.2, 0.9],
-        'volume_ratio': [1.2, 0.9, 1.5]
-    })# 保底返回
+    # 所有数据源都失败时，返回带结构的安全空DataFrame
+    st.error("❌ 实时数据源暂时不可用，请稍后刷新页面重试。")
+    safety_columns = ['code', 'name', 'price', 'pct_chg', 'turnover', 
+                     'volume_ratio', 'float_mv', 'total_mv', 'pe_ttm', 'pb', 'pct_5d']
+    return pd.DataFrame(columns=safety_columns)
 
 @st.cache_data(ttl=300)
 def get_minute_kline(symbol, days=1):
@@ -1127,6 +1133,7 @@ def main():
 # ============================================================
 if __name__ == "__main__":
     main()
+
 
 
 

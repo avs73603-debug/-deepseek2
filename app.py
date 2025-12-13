@@ -21,10 +21,6 @@ import io
 import base64
 
 # 强制设置环境变量（用于Render部署）
-import os
-if 'DEEPSEEK_API_KEY' not in os.environ:
-    # 将下面的 'sk-你的真实API密钥' 替换为你从DeepSeek官网获取的真实密钥
-    os.environ['DEEPSEEK_API_KEY'] = 'sk-你的真实API密钥'
 # ============================================================
 # 全局配置：页面布局、样式、时区、API客户端初始化
 # 必须放在最前面，避免Streamlit警告。设置宽屏模式以充分利用屏幕空间
@@ -48,15 +44,25 @@ TZ = pytz.timezone('Asia/Shanghai')
 def get_deepseek_client():
     """获取DeepSeek API客户端，支持本地和云端环境"""
     try:
-        api_key = st.secrets.get("DEEPSEEK_API_KEY", "")
+        # 方法1: 优先尝试从环境变量读取
+        import os
+        api_key = os.environ.get('DEEPSEEK_API_KEY')
+        
+        # 方法2: 如果环境变量没有，再尝试从st.secrets读取
         if not api_key:
+            api_key = st.secrets.get("DEEPSEEK_API_KEY", "")
+        
+        # 如果两种方法都没有获取到密钥
+        if not api_key:
+            st.warning("⚠️ DeepSeek API未配置: 请在Render的环境变量中设置 DEEPSEEK_API_KEY")
             return None
+            
         return OpenAI(
             api_key=api_key,
             base_url="https://api.deepseek.com"
         )
     except Exception as e:
-        st.warning(f"⚠️ DeepSeek API未配置: {e}")
+        st.warning(f"⚠️ DeepSeek API配置错误: {e}")
         return None
 
 DEEPSEEK_CLIENT = get_deepseek_client()
@@ -71,31 +77,38 @@ DEEPSEEK_CLIENT = get_deepseek_client()
 def get_all_stocks():
     """
     获取全A股票池（约5300只）+ 实时行情数据
-    数据源：akshare的stock_zh_a_spot_em接口（东方财富实时数据）
-    返回字段：代码、名称、最新价、涨跌幅、换手率、量比、市值、PE、PB等
-    异常处理：网络超时或接口失败时返回空DataFrame，避免程序崩溃
+    增加重试机制和友好错误处理
     """
-    try:
-        df = ak.stock_zh_a_spot_em()
-        # 字段映射：东方财富接口字段名转标准名称
-        df = df.rename(columns={
-            '代码': 'code',
-            '名称': 'name',
-            '最新价': 'price',
-            '涨跌幅': 'pct_chg',
-            '换手率': 'turnover',
-            '量比': 'volume_ratio',
-            '流通市值': 'float_mv',
-            '总市值': 'total_mv',
-            '市盈率-动态': 'pe_ttm',
-            '市净率': 'pb',
-            '60日涨跌幅': 'pct_60d',
-            '年初至今涨跌': 'pct_ytd'
-        })
-        return df
-    except Exception as e:
-        st.error(f"❌ 数据获取失败: {e}")
-        return pd.DataFrame()
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            df = ak.stock_zh_a_spot_em()
+            # 字段映射：东方财富接口字段名转标准名称
+            df = df.rename(columns={
+                '代码': 'code',
+                '名称': 'name',
+                '最新价': 'price',
+                '涨跌幅': 'pct_chg',
+                '换手率': 'turnover',
+                '量比': 'volume_ratio',
+                '流通市值': 'float_mv',
+                '总市值': 'total_mv',
+                '市盈率-动态': 'pe_ttm',
+                '市净率': 'pb',
+                '60日涨跌幅': 'pct_60d',
+                '年初至今涨跌': 'pct_ytd'
+            })
+            return df
+        except Exception as e:
+            if attempt < max_retries - 1:  # 如果不是最后一次重试
+                time_module.sleep(2)  # 等待2秒后重试
+                continue
+            else:  # 最后一次重试也失败
+                # 返回一个空的DataFrame，但包含必要的列，防止程序完全崩溃
+                st.error(f"❌ 数据获取失败，请稍后刷新。错误详情: {e}")
+                return pd.DataFrame(columns=['code', 'name', 'price', 'pct_chg', 'turnover'])
+    
+    return pd.DataFrame()  # 保底返回
 
 @st.cache_data(ttl=300)
 def get_minute_kline(symbol, days=1):
@@ -1074,4 +1087,5 @@ def main():
 # ============================================================
 if __name__ == "__main__":
     main()
+
 

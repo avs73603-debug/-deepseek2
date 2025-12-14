@@ -185,7 +185,7 @@ def get_latest_trade_date():
 # ============================================================
 @st.cache_data(ttl=300)
 @retry_on_failure(max_retries=5, delay=2)  # 增加重试次数和延迟
-import baostock as bs  # 加这行import（放到文件顶部其他import附近）
+
 
 @st.cache_data(ttl=300)  # 5分钟缓存
 @retry_on_failure(max_retries=5, delay=3)
@@ -1336,6 +1336,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 

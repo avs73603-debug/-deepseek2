@@ -1,3 +1,4 @@
+内容由用户生成，未经核实。
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
@@ -5,7 +6,7 @@
 核心升级：MACD/KDJ/EXPMA/W&R/RSI全技术指标筛选 + 形态识别 + 市场关注度
 作者：首席量化工程师
 """
-import requests
+
 import streamlit as st
 import akshare as ak
 import pandas as pd
@@ -73,34 +74,6 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 TZ = pytz.timezone('Asia/Shanghai')
-
-# ============================================================
-# 强制使用近120天数据的修复函数
-# ============================================================
-def fixed_get_stock_history(symbol, period='daily', days=120):
-    """强制使用120天数据的版本"""
-    end_date = datetime.now(TZ).strftime('%Y%m%d')
-    start_date = (datetime.now(TZ) - timedelta(days=days)).strftime('%Y%m%d')
-    
-    try:
-        df = ak.stock_zh_a_hist(
-            symbol=symbol, period=period,
-            start_date=start_date, end_date=end_date, adjust="qfq"
-        )
-        
-        if df.empty:
-            return pd.DataFrame()
-        
-        df.columns = ['date', 'open', 'close', 'high', 'low', 'volume', 
-                      'amount', 'amplitude', 'pct_chg', 'chg', 'turnover']
-        df['date'] = pd.to_datetime(df['date'])
-        
-        # 显示实际获取的数据范围
-        print(f"[DEBUG] {symbol}: {start_date} 到 {end_date}, 实际天数: {len(df)}")
-        return df
-    except Exception as e:
-        print(f"[ERROR] 获取{symbol}数据失败: {e}")
-        return pd.DataFrame()
 
 # ============================================================
 # 装饰器：重试机制
@@ -184,128 +157,49 @@ def get_latest_trade_date():
 # 数据获取层
 # ============================================================
 @st.cache_data(ttl=300)
-@retry_on_failure(max_retries=5, delay=2)  # 增加重试次数和延迟
-
-
-@st.cache_data(ttl=300)  # 5分钟缓存
-@retry_on_failure(max_retries=5, delay=3)
+@retry_on_failure(max_retries=3)
 def get_all_stocks_realtime():
-    """
-    使用新浪财经JSON API获取全A股实时数据（海外超级稳定版）
-    分页拉取，通常5-6页就能覆盖所有A股
-    """
-    url_template = "http://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getHQNodeData?page={page}&num=1000&sort=symbol&asc=1&node=hs_a&symbol="
-    
-    all_data = []
-    page = 1
-    
-    while True:
-        url = url_template.format(page=page)
-        try:
-            response = requests.get(url, timeout=10)
-            if response.status_code != 200:
-                break
-                
-            text = response.text
-            if not text or text == 'null' or len(text) < 10:
-                break
-                
-            # Sina返回的是JS对象格式，转成标准JSON
-            text = text.replace('symbol', '"symbol"').replace('code', '"code"').replace('name', '"name"') \
-                       .replace('open', '"open"').replace('high', '"high"').replace('low', '"low"') \
-                       .replace('trade', '"price"').replace('pricechange', '"change"').replace('changepercent', '"pct_chg"') \
-                       .replace('buy', '"buy"').replace('sell', '"sell"').replace('settlement', '"settlement"') \
-                       .replace('volume', '"volume"').replace('amount', '"amount"').replace('ticktime', '"ticktime"') \
-                       .replace('per', '"pe"').replace('pb', '"pb"').replace('mktcap', '"total_mv"').replace('circ_mv', '"float_mv"') \
-                       .replace('turnoverratio', '"turnover"').replace('lb', '"volume_ratio"')
-            
-            page_data = json.loads(text)
-            if not page_data:
-                break
-                
-            all_data.extend(page_data)
-            page += 1
-            
-            if len(page_data) < 1000:  # 最后一页通常少于1000
-                break
-                
-        except Exception as e:
-            print(f"页面{page}获取失败: {e}")
-            break
-    
-    if not all_data:
-        return pd.DataFrame()
-    
-    df = pd.DataFrame(all_data)
-    
-    # 处理字段类型
-    numeric_cols = ['price', 'pct_chg', 'turnover', 'volume_ratio', 'float_mv', 'total_mv', 'pe', 'pb', 'open', 'high', 'low', 'volume', 'amount']
-    for col in numeric_cols:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-    
-    # 代码处理：新浪代码带sh/sz前缀，去掉只留6位
-    df['code'] = df['symbol'].str.replace('sh', '').str.replace('sz', '')
-    
-    # 重命名和补充列（匹配你原来的）
+    df = ak.stock_zh_a_spot_em()
     df = df.rename(columns={
-        'name': 'name',
-        'price': 'price',  # trade字段是最新价
-        'pct_chg': 'pct_chg',
-        'turnover': 'turnover',  # 换手率
-        'volume_ratio': 'volume_ratio',  # 量比
-        'float_mv': 'float_mv',  # 流通市值（单位：元，转亿）
-        'total_mv': 'total_mv',   # 总市值（单位：元，转亿）
-        'pe': 'pe_ttm',
+        '代码': 'code', '名称': 'name', '最新价': 'price',
+        '涨跌幅': 'pct_chg', '换手率': 'turnover', '量比': 'volume_ratio',
+        '流通市值': 'float_mv', '总市值': 'total_mv',
+        '市盈率-动态': 'pe_ttm', '市净率': 'pb',
+        '今开': 'open', '最高': 'high', '最低': 'low', '成交量': 'volume',
+        '成交额': 'amount', '振幅': 'amplitude', '涨速': 'speed',
+        '5分钟涨跌': 'pct_5min', '60日涨跌幅': 'pct_60d'
     })
-    
-    # 单位转换：市值从元转亿
-    if 'float_mv' in df.columns:
-        df['float_mv'] = df['float_mv'] / 100000000
-    if 'total_mv' in df.columns:
-        df['total_mv'] = df['total_mv'] / 100000000
-    
-    # 过滤A股（排除北交所等）
-    df = df[df['code'].str.match(r'^(00|60|68|30)\d{4}$')]
-    
-    return df[['code', 'name', 'price', 'pct_chg', 'turnover', 'volume_ratio', 
-               'float_mv', 'total_mv', 'pe_ttm', 'pb', 'open', 'high', 'low', 
-               'volume', 'amount']]
+    return df
+
 @st.cache_data(ttl=14400)
 @retry_on_failure(max_retries=3)
 def get_stock_history(symbol, period='daily', days=120):
-    bs.login()
+    """
+    获取个股历史数据（用于技术指标计算）
+    days=120确保有足够数据计算长周期指标（如MACD的26日EMA）
+    """
+    end_date = datetime.now(TZ).strftime('%Y%m%d')
+    start_date = (datetime.now(TZ) - timedelta(days=days)).strftime('%Y%m%d')
     
-    # 转code格式
-    if symbol.startswith('6'):
-        code = f"sh.{symbol}"
-    elif symbol.startswith('8') or symbol.startswith('4'):
-        code = f"bj.{symbol}"
-    else:
-        code = f"sz.{symbol}"
-    
-    end_date = datetime.now(TZ).strftime('%Y-%m-%d')
-    start_date = (datetime.now(TZ) - timedelta(days=days+50)).strftime('%Y-%m-%d')  # 多取点
-    
-    rs = bs.query_history_k_data_plus(
-        code,
-        fields="date,open,high,low,close,volume,amount,pctChg,turn",
-        start_date=start_date,
-        end_date=end_date,
-        frequency="d" if period == 'daily' else "w"
+    df = ak.stock_zh_a_hist(
+        symbol=symbol, period=period,
+        start_date=start_date, end_date=end_date, adjust="qfq"
     )
-    
-    df = rs.get_data()
-    bs.logout()
     
     if df.empty:
         return pd.DataFrame()
     
-    df.columns = ['date', 'open', 'high', 'low', 'close', 'volume', 'amount', 'pct_chg', 'turnover']
+    df.columns = ['date', 'open', 'close', 'high', 'low', 'volume', 
+                  'amount', 'amplitude', 'pct_chg', 'chg', 'turnover']
     df['date'] = pd.to_datetime(df['date'])
-    df[['open', 'high', 'low', 'close', 'volume', 'amount', 'pct_chg', 'turnover']] = df[['open', 'high', 'low', 'close', 'volume', 'amount', 'pct_chg', 'turnover']].astype(float)
-    
-    return df.tail(days)  # 只返回最近days天
+    return df
+
+@st.cache_data(ttl=600)
+@retry_on_failure(max_retries=2)
+def get_north_flow():
+    df = ak.stock_hsgt_board_rank_em(symbol="北向资金增持市值", indicator="今日排行")
+    return df
+
 @st.cache_data(ttl=3600)
 @retry_on_failure(max_retries=2)
 def get_stock_hot_rank():
@@ -319,7 +213,8 @@ def get_stock_hot_rank():
         return df
     except:
         return pd.DataFrame()
-        # ============================================================
+
+# ============================================================
 # 技术指标计算模块（核心）
 # 
 # 实现的指标：
@@ -486,7 +381,8 @@ def calculate_ma(df, periods=[5, 10, 20, 60]):
         df[f'ma{period}'] = df['close'].rolling(window=period, min_periods=1).mean()
     
     return df
-    # ============================================================
+
+# ============================================================
 # 技术信号识别模块（核心）
 # 
 # 识别逻辑：
@@ -697,6 +593,7 @@ def calculate_market_attention(code, hot_df):
             score += max(0, 100 - rank)
     
     return min(score, 100)
+
 # ============================================================
 # G信号系统
 # ============================================================
@@ -777,7 +674,8 @@ def scan_g_signals_optimized(df_stocks, limit=200):
             results[symbol] = matched_signals
     
     return results
-    # ============================================================
+
+# ============================================================
 # 多因子打分（增强版：加入技术指标权重）
 # 
 # 新的打分逻辑：
@@ -964,7 +862,8 @@ def filter_and_score_with_technicals(df, filters, north_symbols, hot_df, g_resul
     df = df.sort_values('score', ascending=False)
     
     return df
-    # ============================================================
+
+# ============================================================
 # K线图绘制（增强版：显示技术指标）
 # ============================================================
 def plot_kline_with_indicators(symbol, name, period='daily'):
@@ -977,7 +876,6 @@ def plot_kline_with_indicators(symbol, name, period='daily'):
         title_suffix = "分时"
     else:
         period_map = {'daily': '日K', 'weekly': '周K', 'monthly': '月K'}
-        # 统一获取120天数据
         df = get_stock_history(symbol, period=period, days=120)
         title_suffix = period_map.get(period, '日K')
     
@@ -986,8 +884,6 @@ def plot_kline_with_indicators(symbol, name, period='daily'):
         fig.add_annotation(text="暂无数据", x=0.5, y=0.5, showarrow=False)
         fig.update_layout(height=400)
         return fig
-    
-    # ... 其余代码保持不变 ...
     
     # 计算技术指标
     df = calculate_ma(df, periods=[5, 10, 20, 60])
@@ -1073,7 +969,8 @@ def plot_kline_with_indicators(symbol, name, period='daily'):
     )
     
     return fig
-    # ============================================================
+
+# ============================================================
 # 侧边栏筛选器（完整版：包含所有技术指标）
 # ============================================================
 def render_sidebar_with_technicals(top10_data, filters):
@@ -1181,13 +1078,14 @@ def render_sidebar_with_technicals(top10_data, filters):
                 st.info("AI功能开发中...")
     
     return filters
-    # ============================================================
+
+# ============================================================
 # 主程序
 # ============================================================
 def main():
+    """主程序入口"""
     
     init_g_signals()
-    # ... 其余代码 ...
     
     st.title("📈 DeepSeek量化投研终端 V3.0")
     st.caption("🚀 技术指标完整版 | MACD/KDJ/EXPMA/W&R/RSI/形态识别")
@@ -1336,12 +1234,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
-
-
-
-

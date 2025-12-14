@@ -159,83 +159,121 @@ def get_latest_trade_date():
 @st.cache_data(ttl=300)
 @retry_on_failure(max_retries=3)
 @st.cache_data(ttl=4*3600)
-def get_all_stocks():
+@st.cache_data(ttl=300)
+@retry_on_failure(max_retries=5, delay=2)  # 增加重试次数，更稳健
+def get_all_stocks_realtime():
     """
-    获取全A股票池 - 已修正新浪接口列名问题
+    获取全A股实时数据（多数据源容错版）
+    优先尝试东方财富接口 → 备用新浪接口
+    自动映射列名 + 补全缺失列（确保与原代码完全兼容）
     """
-    max_retries = 2
+    import time as time_module  # 确保已导入
+    
+    # 数据源顺序：优先东方财富（字段最全），备用新浪
     data_sources = [
-        {"name": "新浪", "func": lambda: ak.stock_zh_a_spot()},
-        {"name": "东方财富", "func": lambda: ak.stock_zh_a_spot_em()}
+        {
+            "name": "东方财富",
+            "func": lambda: ak.stock_zh_a_spot_em()
+        },
+        {
+            "name": "新浪",
+            "func": lambda: ak.stock_zh_a_spot()
+        }
     ]
     
     for source in data_sources:
-        for attempt in range(max_retries):
-            try:
-                st.info(f"正在从【{source['name']}】接口获取数据...")
-                df = source['func']()
-                
-                # 根据数据源进行正确的字段映射
-                if source['name'] == "新浪":
-                    # 【关键修正】新浪接口实际返回中文列名
-                    column_mapping = {
-                        '代码': 'code',
-                        '名称': 'name', 
-                        '最新价': 'price',
-                        '涨跌幅': 'pct_chg',
-                        # 新浪可能没有的字段，后续会统一补全
-                    }
-                else:  # 东方财富
-                    column_mapping = {
-                        '代码': 'code',
-                        '名称': 'name',
-                        '最新价': 'price', 
-                        '涨跌幅': 'pct_chg',
-                        '换手率': 'turnover',
-                        '量比': 'volume_ratio',
-                        '流通市值': 'float_mv',
-                        '总市值': 'total_mv',
-                        '市盈率-动态': 'pe_ttm',
-                        '市净率': 'pb'
-                    }
-                
-                # 应用字段重命名
-                df = df.rename(columns=column_mapping)
-                
-                # ====== 确保所有必需列都存在 ======
-                required_columns = {
-                    'code': 'Unknown',
-                    'name': 'Unknown', 
-                    'price': 0.0,
-                    'pct_chg': 0.0,
-                    'turnover': 0.0,      # 新浪可能缺失
-                    'volume_ratio': 1.0,  # 新浪可能缺失
-                    'float_mv': 0.0,      # 新浪可能缺失
-                    'total_mv': 0.0,      # 新浪可能缺失
-                    'pe_ttm': 0.0,        # 新浪可能缺失
-                    'pb': 0.0,            # 新浪可能缺失
-                    'pct_5d': 0.0
+        try:
+            df = source["func"]()
+            
+            if df.empty:
+                continue  # 直接尝试下一个源
+            
+            # ===== 列名映射（根据实际接口返回的中文字段）=====
+            if source["name"] == "东方财富":
+                column_mapping = {
+                    '代码': 'code',
+                    '名称': 'name',
+                    '最新价': 'price',
+                    '涨跌幅': 'pct_chg',
+                    '换手率': 'turnover',
+                    '量比': 'volume_ratio',
+                    '流通市值': 'float_mv',
+                    '总市值': 'total_mv',
+                    '市盈率-动态': 'pe_ttm',
+                    '市净率': 'pb',
+                    '今开': 'open',
+                    '最高': 'high',
+                    '最低': 'low',
+                    '成交量': 'volume',
+                    '成交额': 'amount',
+                    '振幅': 'amplitude',
+                    '涨速': 'speed',
+                    '5分钟涨跌': 'pct_5min',
+                    '60日涨跌幅': 'pct_60d'
                 }
-                
-                for col, default_val in required_columns.items():
-                    if col not in df.columns:
-                        df[col] = default_val
-                # ====== 修复结束 ======
-                
-                st.success(f"✅ 成功获取{len(df)}条数据")
-                return df
-                
-            except Exception as e:
-                if attempt < max_retries - 1:
-                    time_module.sleep(1)
-                    continue
-                else:
-                    st.warning(f"⚠️ 【{source['name']}】接口尝试失败，将尝试备用源...")
+            else:  # 新浪接口（字段较少）
+                column_mapping = {
+                    '代码': 'code',
+                    '名称': 'name',
+                    '最新价': 'price',
+                    '涨跌幅': 'pct_chg',
+                    # 新浪缺少的字段后续统一补全
+                }
+            
+            df = df.rename(columns=column_mapping)
+            
+            # ===== 确保所有原代码需要的列都存在（缺失补默认值）=====
+            required_columns = {
+                'code': '',
+                'name': 'Unknown',
+                'price': 0.0,
+                'pct_chg': 0.0,
+                'turnover': 0.0,
+                'volume_ratio': 1.0,
+                'float_mv': 0.0,
+                'total_mv': 0.0,
+                'pe_ttm': 0.0,
+                'pb': 0.0,
+                'open': 0.0,
+                'high': 0.0,
+                'low': 0.0,
+                'volume': 0.0,
+                'amount': 0.0,
+                'amplitude': 0.0,
+                'speed': 0.0,
+                'pct_5min': 0.0,
+                'pct_60d': 0.0,
+                # 原代码中后续会模拟的字段
+                'pct_5d': 0.0
+            }
+            
+            for col, default_val in required_columns.items():
+                if col not in df.columns:
+                    df[col] = default_val
+            
+            # 数值列强制转类型（防止后续计算报错）
+            numeric_cols = ['price', 'pct_chg', 'turnover', 'volume_ratio', 
+                            'float_mv', 'total_mv', 'pe_ttm', 'pb', 'open', 
+                            'high', 'low', 'volume', 'amount', 'pct_5d']
+            for col in numeric_cols:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
+            
+            # 代码清洗（确保6位数字字符串）
+            if 'code' in df.columns:
+                df['code'] = df['code'].astype(str).str.zfill(6)
+            
+            return df
+            
+        except Exception as e:
+            # 静默重试（不干扰缓存）
+            time_module.sleep(1)
+            continue
     
-    # 所有数据源都失败
-    st.error("❌ 数据获取失败，请检查网络后刷新。")
+    # 所有源都失败 → 返回空DataFrame（触发原代码的“数据加载失败”提示）
     safety_columns = ['code', 'name', 'price', 'pct_chg', 'turnover', 
-                     'volume_ratio', 'float_mv', 'total_mv', 'pe_ttm', 'pb', 'pct_5d']
+                      'volume_ratio', 'float_mv', 'total_mv', 'pe_ttm', 'pb', 
+                      'open', 'high', 'low', 'volume', 'amount', 'pct_5d']
     return pd.DataFrame(columns=safety_columns)
 
 @st.cache_data(ttl=14400)
@@ -1301,5 +1339,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 

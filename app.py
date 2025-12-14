@@ -75,6 +75,34 @@ st.markdown("""
 TZ = pytz.timezone('Asia/Shanghai')
 
 # ============================================================
+# 强制使用近120天数据的修复函数
+# ============================================================
+def fixed_get_stock_history(symbol, period='daily', days=120):
+    """强制使用120天数据的版本"""
+    end_date = datetime.now(TZ).strftime('%Y%m%d')
+    start_date = (datetime.now(TZ) - timedelta(days=days)).strftime('%Y%m%d')
+    
+    try:
+        df = ak.stock_zh_a_hist(
+            symbol=symbol, period=period,
+            start_date=start_date, end_date=end_date, adjust="qfq"
+        )
+        
+        if df.empty:
+            return pd.DataFrame()
+        
+        df.columns = ['date', 'open', 'close', 'high', 'low', 'volume', 
+                      'amount', 'amplitude', 'pct_chg', 'chg', 'turnover']
+        df['date'] = pd.to_datetime(df['date'])
+        
+        # 显示实际获取的数据范围
+        print(f"[DEBUG] {symbol}: {start_date} 到 {end_date}, 实际天数: {len(df)}")
+        return df
+    except Exception as e:
+        print(f"[ERROR] 获取{symbol}数据失败: {e}")
+        return pd.DataFrame()
+
+# ============================================================
 # 装饰器：重试机制
 # ============================================================
 def retry_on_failure(max_retries=3, delay=1):
@@ -167,26 +195,8 @@ def get_all_stocks_realtime():
 @st.cache_data(ttl=14400)
 @retry_on_failure(max_retries=3)
 def get_stock_history(symbol, period='daily', days=120):
-    """
-    获取个股历史数据（用于技术指标计算）
-    days=120确保有足够数据计算长周期指标（如MACD的26日EMA）
-    """
-    # 统一使用近120天的数据，不再区分交易时间
-    end_date = datetime.now(TZ).strftime('%Y%m%d')
-    start_date = (datetime.now(TZ) - timedelta(days=days)).strftime('%Y%m%d')
-    
-    df = ak.stock_zh_a_hist(
-        symbol=symbol, period=period,
-        start_date=start_date, end_date=end_date, adjust="qfq"
-    )
-    
-    if df.empty:
-        return pd.DataFrame()
-    
-    df.columns = ['date', 'open', 'close', 'high', 'low', 'volume', 
-                  'amount', 'amplitude', 'pct_chg', 'chg', 'turnover']
-    df['date'] = pd.to_datetime(df['date'])
-    return df
+    """获取个股历史数据 - 强制120天版本"""
+    return fixed_get_stock_history(symbol, period, days)
 @st.cache_data(ttl=600)
 @retry_on_failure(max_retries=2)
 def get_north_flow():
@@ -1073,8 +1083,18 @@ def render_sidebar_with_technicals(top10_data, filters):
 # ============================================================
 def main():
     """主程序入口"""
+    # 验证数据范围
+    st.write("🔍 数据获取范围验证:")
+    test_result = get_stock_history("000001", days=120)
+    if not test_result.empty:
+        dates = test_result['date']
+        st.write(f"测试股票000001数据范围:")
+        st.write(f"- 最早日期: {dates.min().strftime('%Y-%m-%d')}")
+        st.write(f"- 最新日期: {dates.max().strftime('%Y-%m-%d')}")
+        st.write(f"- 总交易日数: {len(dates)}")
     
     init_g_signals()
+    # ... 其余代码 ...
     
     st.title("📈 DeepSeek量化投研终端 V3.0")
     st.caption("🚀 技术指标完整版 | MACD/KDJ/EXPMA/W&R/RSI/形态识别")
@@ -1223,5 +1243,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 

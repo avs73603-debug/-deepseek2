@@ -169,15 +169,20 @@ def get_all_stocks_realtime():
 def get_stock_history(symbol, period='daily', days=120):
     """
     获取个股历史数据（用于技术指标计算）
-    days=120确保有足够数据计算长周期指标（如MACD的26日EMA）
+    核心修复：强制限制返回最近N天的数据，避免返回1990年至今的全部数据
     """
     end_date = datetime.now(TZ).strftime('%Y%m%d')
-    start_date = (datetime.now(TZ) - timedelta(days=days)).strftime('%Y%m%d')
+    start_date = (datetime.now(TZ) - timedelta(days=days*2)).strftime('%Y%m%d')
+    # 注意：将start_date设为所需天数的两倍，因为akshare接口可能需要更早的起点来计算复权
     
-    df = ak.stock_zh_a_hist(
-        symbol=symbol, period=period,
-        start_date=start_date, end_date=end_date, adjust="qfq"
-    )
+    try:
+        df = ak.stock_zh_a_hist(
+            symbol=symbol, period=period,
+            start_date=start_date, end_date=end_date, adjust="qfq"
+        )
+    except Exception as e:
+        st.warning(f"获取{symbol}历史数据失败: {e}")
+        return pd.DataFrame()
     
     if df.empty:
         return pd.DataFrame()
@@ -185,6 +190,20 @@ def get_stock_history(symbol, period='daily', days=120):
     df.columns = ['date', 'open', 'close', 'high', 'low', 'volume', 
                   'amount', 'amplitude', 'pct_chg', 'chg', 'turnover']
     df['date'] = pd.to_datetime(df['date'])
+    
+    # ====== 【关键修复】确保只返回最近的数据 ======
+    # 按日期排序（确保最新数据在最后）
+    df = df.sort_values('date', ascending=True).reset_index(drop=True)
+    
+    # 取最后 `days` 天的数据（保证数据量足够计算指标）
+    if len(df) > days:
+        df = df.tail(days)
+    
+    # 如果数据量仍然不足，打印警告
+    if len(df) < 30:  # 少于30条数据可能无法计算部分技术指标
+        st.warning(f"股票 {symbol} 历史数据不足，仅获取到 {len(df)} 条记录。")
+    # ====== 修复结束 ======
+    
     return df
 
 @st.cache_data(ttl=600)
@@ -1220,3 +1239,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

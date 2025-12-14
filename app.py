@@ -247,14 +247,38 @@ def get_all_stocks_realtime():
 @st.cache_data(ttl=14400)
 @retry_on_failure(max_retries=3)
 def get_stock_history(symbol, period='daily', days=120):
-    """获取个股历史数据 - 强制120天版本"""
-    return fixed_get_stock_history(symbol, period, days)
-@st.cache_data(ttl=600)
-@retry_on_failure(max_retries=2)
-def get_north_flow():
-    df = ak.stock_hsgt_board_rank_em(symbol="北向资金增持市值", indicator="今日排行")
-    return df
-
+    bs.login()
+    
+    # 转code格式
+    if symbol.startswith('6'):
+        code = f"sh.{symbol}"
+    elif symbol.startswith('8') or symbol.startswith('4'):
+        code = f"bj.{symbol}"
+    else:
+        code = f"sz.{symbol}"
+    
+    end_date = datetime.now(TZ).strftime('%Y-%m-%d')
+    start_date = (datetime.now(TZ) - timedelta(days=days+50)).strftime('%Y-%m-%d')  # 多取点
+    
+    rs = bs.query_history_k_data_plus(
+        code,
+        fields="date,open,high,low,close,volume,amount,pctChg,turn",
+        start_date=start_date,
+        end_date=end_date,
+        frequency="d" if period == 'daily' else "w"
+    )
+    
+    df = rs.get_data()
+    bs.logout()
+    
+    if df.empty:
+        return pd.DataFrame()
+    
+    df.columns = ['date', 'open', 'high', 'low', 'close', 'volume', 'amount', 'pct_chg', 'turnover']
+    df['date'] = pd.to_datetime(df['date'])
+    df[['open', 'high', 'low', 'close', 'volume', 'amount', 'pct_chg', 'turnover']] = df[['open', 'high', 'low', 'close', 'volume', 'amount', 'pct_chg', 'turnover']].astype(float)
+    
+    return df.tail(days)  # 只返回最近days天
 @st.cache_data(ttl=3600)
 @retry_on_failure(max_retries=2)
 def get_stock_hot_rank():
@@ -1285,6 +1309,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 

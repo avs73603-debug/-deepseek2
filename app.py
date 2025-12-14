@@ -5,7 +5,7 @@
 核心升级：MACD/KDJ/EXPMA/W&R/RSI全技术指标筛选 + 形态识别 + 市场关注度
 作者：首席量化工程师
 """
-
+import requests
 import streamlit as st
 import akshare as ak
 import pandas as pd
@@ -187,63 +187,90 @@ def get_latest_trade_date():
 @retry_on_failure(max_retries=5, delay=2)  # 增加重试次数和延迟
 import baostock as bs  # 加这行import（放到文件顶部其他import附近）
 
-@st.cache_data(ttl=300)
-@retry_on_failure(max_retries=5, delay=2)
+@st.cache_data(ttl=300)  # 5分钟缓存
+@retry_on_failure(max_retries=5, delay=3)
 def get_all_stocks_realtime():
     """
-    使用baostock获取所有A股实时数据（海外稳定版）
+    使用新浪财经JSON API获取全A股实时数据（海外超级稳定版）
+    分页拉取，通常5-6页就能覆盖所有A股
     """
-    # 登录baostock（免费，失败也会返回部分数据）
-    lg = bs.login()
-    if lg.error_code != '0':
-        st.warning(f"baostock登录警告: {lg.error_msg}")
+    url_template = "http://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getHQNodeData?page={page}&num=1000&sort=symbol&asc=1&node=hs_a&symbol="
     
-    # 获取当日所有股票列表和实时数据
-    rs = bs.query_all_stock(day=datetime.now(TZ).strftime('%Y-%m-%d'))
-    if rs.error_code != '0':
-        bs.logout()
+    all_data = []
+    page = 1
+    
+    while True:
+        url = url_template.format(page=page)
+        try:
+            response = requests.get(url, timeout=10)
+            if response.status_code != 200:
+                break
+                
+            text = response.text
+            if not text or text == 'null' or len(text) < 10:
+                break
+                
+            # Sina返回的是JS对象格式，转成标准JSON
+            text = text.replace('symbol', '"symbol"').replace('code', '"code"').replace('name', '"name"') \
+                       .replace('open', '"open"').replace('high', '"high"').replace('low', '"low"') \
+                       .replace('trade', '"price"').replace('pricechange', '"change"').replace('changepercent', '"pct_chg"') \
+                       .replace('buy', '"buy"').replace('sell', '"sell"').replace('settlement', '"settlement"') \
+                       .replace('volume', '"volume"').replace('amount', '"amount"').replace('ticktime', '"ticktime"') \
+                       .replace('per', '"pe"').replace('pb', '"pb"').replace('mktcap', '"total_mv"').replace('circ_mv', '"float_mv"') \
+                       .replace('turnoverratio', '"turnover"').replace('lb', '"volume_ratio"')
+            
+            page_data = json.loads(text)
+            if not page_data:
+                break
+                
+            all_data.extend(page_data)
+            page += 1
+            
+            if len(page_data) < 1000:  # 最后一页通常少于1000
+                break
+                
+        except Exception as e:
+            print(f"页面{page}获取失败: {e}")
+            break
+    
+    if not all_data:
         return pd.DataFrame()
     
-    df = rs.get_data()
+    df = pd.DataFrame(all_data)
     
-    # 过滤A股（code以sh.60、sz.00、sz.30、bj. 开头）
-    df = df[df['code'].str.startswith(('sh.60', 'sz.00', 'sz.30', 'bj.'))]
+    # 处理字段类型
+    numeric_cols = ['price', 'pct_chg', 'turnover', 'volume_ratio', 'float_mv', 'total_mv', 'pe', 'pb', 'open', 'high', 'low', 'volume', 'amount']
+    for col in numeric_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
     
-    # 重命名列，和你原来的代码保持一致
+    # 代码处理：新浪代码带sh/sz前缀，去掉只留6位
+    df['code'] = df['symbol'].str.replace('sh', '').str.replace('sz', '')
+    
+    # 重命名和补充列（匹配你原来的）
     df = df.rename(columns={
-        'code': 'code',
-        'tradeStatus': 'trade_status',  # 交易状态
-        'open': 'open',
-        'high': 'high',
-        'low': 'low',
-        'close': 'price',  # 最新价用close
-        'preclose': 'pre_close',
-        'volume': 'volume',
-        'amount': 'amount',
-        'pctChg': 'pct_chg',  # 涨跌幅
-        'turn': 'turnover',  # 换手率
-        'peTTM': 'pe_ttm',
-        'pbMRQ': 'pb'
+        'name': 'name',
+        'price': 'price',  # trade字段是最新价
+        'pct_chg': 'pct_chg',
+        'turnover': 'turnover',  # 换手率
+        'volume_ratio': 'volume_ratio',  # 量比
+        'float_mv': 'float_mv',  # 流通市值（单位：元，转亿）
+        'total_mv': 'total_mv',   # 总市值（单位：元，转亿）
+        'pe': 'pe_ttm',
     })
     
-    # 计算一些缺失字段（量比、流通市值等可以用近似或跳过）
-    df['volume_ratio'] = 1.0  # 临时填1，baostock没有量比，可后续补充
-    df['float_mv'] = 0.0  # 流通市值baostock没有，直接填0或后续加接口
-    df['total_mv'] = 0.0
+    # 单位转换：市值从元转亿
+    if 'float_mv' in df.columns:
+        df['float_mv'] = df['float_mv'] / 100000000
+    if 'total_mv' in df.columns:
+        df['total_mv'] = df['total_mv'] / 100000000
     
-    # 代码处理：去掉前缀，只留6位数字
-    df['code'] = df['code'].str.replace('sh.', '').str.replace('sz.', '').str.replace('bj.', '').str.replace('sh', '').str.replace('sz', '').str.replace('bj', '')
-    df['name'] = df['code_name']  # 股票名称
-    
-    bs.logout()  # 登出
-    
-    if df.empty:
-        return pd.DataFrame()
+    # 过滤A股（排除北交所等）
+    df = df[df['code'].str.match(r'^(00|60|68|30)\d{4}$')]
     
     return df[['code', 'name', 'price', 'pct_chg', 'turnover', 'volume_ratio', 
                'float_mv', 'total_mv', 'pe_ttm', 'pb', 'open', 'high', 'low', 
-               'volume', 'amount']]  # 返回和你原来一样的列
-
+               'volume', 'amount']]
 @st.cache_data(ttl=14400)
 @retry_on_failure(max_retries=3)
 def get_stock_history(symbol, period='daily', days=120):
@@ -1309,6 +1336,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 

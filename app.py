@@ -795,8 +795,8 @@ def scan_g_signals_optimized(df_stocks, limit=200):
 # - 市场关注度 +5分
 # ============================================================
 def calculate_score_with_technicals(row, north_symbols, tech_signals, hot_df):
-    """增强版打分：基础分+技术指标分"""
-    score = 0
+    """增强版打分：基础分60 + 技术指标40 + 关注度"""
+    score = 0.0  # 强制float，避免类型问题
     
     # 基础分（60分）
     pct_5d = row.get('pct_5d', 0)
@@ -815,7 +815,7 @@ def calculate_score_with_technicals(row, north_symbols, tech_signals, hot_df):
         score += 5
     
     # 技术指标加分（40分）
-    if tech_signals:
+    if tech_signals:  # tech_signals是dict
         if tech_signals.get('macd_golden'):
             score += 5
         if tech_signals.get('macd_low_golden'):
@@ -833,12 +833,13 @@ def calculate_score_with_technicals(row, north_symbols, tech_signals, hot_df):
         if tech_signals.get('one_yang_three_lines'):
             score += 10
     
-    # 市场关注度加分（5分）
+    # 市场关注度加分（最多5分）
     attention_score = calculate_market_attention(row.get('code', ''), hot_df)
     score += attention_score * 0.05
     
-    return min(score, 100)
-
+    # 确保返回单个数字！
+    return float(min(score, 100))
+    
 def filter_and_score_with_technicals(df, filters, north_symbols, hot_df, g_results=None):
     """
     筛选、打分、排序（技术指标增强版）
@@ -953,9 +954,12 @@ def filter_and_score_with_technicals(df, filters, north_symbols, hot_df, g_resul
     
     # 综合打分
     df['tech_signals'] = df['code'].map(lambda x: tech_signals_map.get(x, {}))
-    df['score'] = df.apply(lambda row: calculate_score_with_technicals(
-        row, north_symbols, row.get('tech_signals', {}), hot_df
-    ), axis=1)
+   # 替换原来的 df['score'] = df.apply(...) 这行
+    scores = []
+    for _, row in df.iterrows():
+        s = calculate_score_with_technicals(row, north_symbols, row.get('tech_signals', {}), hot_df)
+        scores.append(float(s))  # 强制float
+    df['score'] = scores
     
     # 标注G信号
     if g_results:
@@ -1339,6 +1343,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 

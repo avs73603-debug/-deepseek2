@@ -1,4 +1,4 @@
-内容由用户生成，未经核实。
+
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
@@ -1234,3 +1234,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

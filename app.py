@@ -185,55 +185,64 @@ def get_latest_trade_date():
 # ============================================================
 @st.cache_data(ttl=300)
 @retry_on_failure(max_retries=5, delay=2)  # 增加重试次数和延迟
+import baostock as bs  # 加这行import（放到文件顶部其他import附近）
+
+@st.cache_data(ttl=300)
+@retry_on_failure(max_retries=5, delay=2)
 def get_all_stocks_realtime():
     """
-    获取所有A股实时数据（优化版：先尝试全量接口，失败则分市场合并）
+    使用baostock获取所有A股实时数据（海外稳定版）
     """
-    import time as time_module
+    # 登录baostock（免费，失败也会返回部分数据）
+    lg = bs.login()
+    if lg.error_code != '0':
+        st.warning(f"baostock登录警告: {lg.error_msg}")
     
-    # 第一优先：尝试原接口（最快）
-    try:
-        df = ak.stock_zh_a_spot_em()
-        if not df.empty and len(df) > 4000:  # 正常A股数量>4000只
-            df = df.rename(columns={
-                '代码': 'code', '名称': 'name', '最新价': 'price',
-                '涨跌幅': 'pct_chg', '换手率': 'turnover', '量比': 'volume_ratio',
-                '流通市值': 'float_mv', '总市值': 'total_mv',
-                '市盈率-动态': 'pe_ttm', '市净率': 'pb',
-                '今开': 'open', '最高': 'high', '最低': 'low', '成交量': 'volume',
-                '成交额': 'amount', '振幅': 'amplitude', '涨速': 'speed',
-                '5分钟涨跌': 'pct_5min', '60日涨跌幅': 'pct_60d'
-            })
-            return df
-    except Exception as e:
-        print(f"全量接口失败: {e}")
-        time_module.sleep(2)  # 暂停一下
+    # 获取当日所有股票列表和实时数据
+    rs = bs.query_all_stock(day=datetime.now(TZ).strftime('%Y-%m-%d'))
+    if rs.error_code != '0':
+        bs.logout()
+        return pd.DataFrame()
     
-    # 第二方案：分市场合并（超级稳定，不会轻易被封）
-    try:
-        df_sh = ak.stock_sh_a_spot_em()   # 沪市
-        df_sz = ak.stock_sz_a_spot_em()   # 深市
-        df_bj = ak.stock_bj_a_spot_em()   # 北交所
-        
-        # 合并
-        df = pd.concat([df_sh, df_sz, df_bj], ignore_index=True)
-        
-        if not df.empty:
-            df = df.rename(columns={
-                '代码': 'code', '名称': 'name', '最新价': 'price',
-                '涨跌幅': 'pct_chg', '换手率': 'turnover', '量比': 'volume_ratio',
-                '流通市值': 'float_mv', '总市值': 'total_mv',
-                '市盈率-动态': 'pe_ttm', '市净率': 'pb',
-                '今开': 'open', '最高': 'high', '最低': 'low', '成交量': 'volume',
-                '成交额': 'amount', '振幅': 'amplitude', '涨速': 'speed',
-                '5分钟涨跌': 'pct_5min', '60日涨跌幅': 'pct_60d'
-            })
-            return df
-    except Exception as e:
-        print(f"分市场合并也失败: {e}")
+    df = rs.get_data()
     
-    # 都失败返回空（触发错误提示）
-    return pd.DataFrame()
+    # 过滤A股（code以sh.60、sz.00、sz.30、bj. 开头）
+    df = df[df['code'].str.startswith(('sh.60', 'sz.00', 'sz.30', 'bj.'))]
+    
+    # 重命名列，和你原来的代码保持一致
+    df = df.rename(columns={
+        'code': 'code',
+        'tradeStatus': 'trade_status',  # 交易状态
+        'open': 'open',
+        'high': 'high',
+        'low': 'low',
+        'close': 'price',  # 最新价用close
+        'preclose': 'pre_close',
+        'volume': 'volume',
+        'amount': 'amount',
+        'pctChg': 'pct_chg',  # 涨跌幅
+        'turn': 'turnover',  # 换手率
+        'peTTM': 'pe_ttm',
+        'pbMRQ': 'pb'
+    })
+    
+    # 计算一些缺失字段（量比、流通市值等可以用近似或跳过）
+    df['volume_ratio'] = 1.0  # 临时填1，baostock没有量比，可后续补充
+    df['float_mv'] = 0.0  # 流通市值baostock没有，直接填0或后续加接口
+    df['total_mv'] = 0.0
+    
+    # 代码处理：去掉前缀，只留6位数字
+    df['code'] = df['code'].str.replace('sh.', '').str.replace('sz.', '').str.replace('bj.', '').str.replace('sh', '').str.replace('sz', '').str.replace('bj', '')
+    df['name'] = df['code_name']  # 股票名称
+    
+    bs.logout()  # 登出
+    
+    if df.empty:
+        return pd.DataFrame()
+    
+    return df[['code', 'name', 'price', 'pct_chg', 'turnover', 'volume_ratio', 
+               'float_mv', 'total_mv', 'pe_ttm', 'pb', 'open', 'high', 'low', 
+               'volume', 'amount']]  # 返回和你原来一样的列
 
 @st.cache_data(ttl=14400)
 @retry_on_failure(max_retries=3)
@@ -1276,6 +1285,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 

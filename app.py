@@ -863,13 +863,20 @@ def filter_and_score_with_technicals(df, filters, north_symbols, hot_df, g_resul
         df = df[~df['name'].str.contains('ST|退', na=False)]
     
     # 应用基础筛选条件
+    min_mv = filters.get('mv_range', [0, 2000])[0]
+    max_mv = filters.get('mv_range', [0, 2000])[1]
+    min_price = filters.get('price_range', [1, 500])[0]
+    max_price = filters.get('price_range', [1, 500])[1]
+    min_pct = filters.get('pct_range', [-10, 10])[0]
+    max_pct = filters.get('pct_range', [-10, 10])[1]
+    
     mask = (
-        (df['float_mv'] / 100000000 >= filters.get('mv_range', [0, 2000])[0]) &
-        (df['float_mv'] / 100000000 <= filters.get('mv_range', [0, 2000])[1]) &
-        (df['price'] >= filters.get('price_range', [1, 500])[0]) &
-        (df['price'] <= filters.get('price_range', [1, 500])[1]) &
-        (df['pct_chg'] >= filters.get('pct_range', [-10, 10])[0]) &
-        (df['pct_chg'] <= filters.get('pct_range', [-10, 10])[1])
+        (df['float_mv'] >= min_mv) &
+        (df['float_mv'] <= max_mv) &
+        (df['price'] >= min_price) &
+        (df['price'] <= max_price) &
+        (df['pct_chg'] >= min_pct) &
+        (df['pct_chg'] <= max_pct)
     )
     df = df[mask].copy()
     
@@ -1343,6 +1350,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 

@@ -184,19 +184,56 @@ def get_latest_trade_date():
 # 数据获取层
 # ============================================================
 @st.cache_data(ttl=300)
-@retry_on_failure(max_retries=3)
+@retry_on_failure(max_retries=5, delay=2)  # 增加重试次数和延迟
 def get_all_stocks_realtime():
-    df = ak.stock_zh_a_spot_em()
-    df = df.rename(columns={
-        '代码': 'code', '名称': 'name', '最新价': 'price',
-        '涨跌幅': 'pct_chg', '换手率': 'turnover', '量比': 'volume_ratio',
-        '流通市值': 'float_mv', '总市值': 'total_mv',
-        '市盈率-动态': 'pe_ttm', '市净率': 'pb',
-        '今开': 'open', '最高': 'high', '最低': 'low', '成交量': 'volume',
-        '成交额': 'amount', '振幅': 'amplitude', '涨速': 'speed',
-        '5分钟涨跌': 'pct_5min', '60日涨跌幅': 'pct_60d'
-    })
-    return df
+    """
+    获取所有A股实时数据（优化版：先尝试全量接口，失败则分市场合并）
+    """
+    import time as time_module
+    
+    # 第一优先：尝试原接口（最快）
+    try:
+        df = ak.stock_zh_a_spot_em()
+        if not df.empty and len(df) > 4000:  # 正常A股数量>4000只
+            df = df.rename(columns={
+                '代码': 'code', '名称': 'name', '最新价': 'price',
+                '涨跌幅': 'pct_chg', '换手率': 'turnover', '量比': 'volume_ratio',
+                '流通市值': 'float_mv', '总市值': 'total_mv',
+                '市盈率-动态': 'pe_ttm', '市净率': 'pb',
+                '今开': 'open', '最高': 'high', '最低': 'low', '成交量': 'volume',
+                '成交额': 'amount', '振幅': 'amplitude', '涨速': 'speed',
+                '5分钟涨跌': 'pct_5min', '60日涨跌幅': 'pct_60d'
+            })
+            return df
+    except Exception as e:
+        print(f"全量接口失败: {e}")
+        time_module.sleep(2)  # 暂停一下
+    
+    # 第二方案：分市场合并（超级稳定，不会轻易被封）
+    try:
+        df_sh = ak.stock_sh_a_spot_em()   # 沪市
+        df_sz = ak.stock_sz_a_spot_em()   # 深市
+        df_bj = ak.stock_bj_a_spot_em()   # 北交所
+        
+        # 合并
+        df = pd.concat([df_sh, df_sz, df_bj], ignore_index=True)
+        
+        if not df.empty:
+            df = df.rename(columns={
+                '代码': 'code', '名称': 'name', '最新价': 'price',
+                '涨跌幅': 'pct_chg', '换手率': 'turnover', '量比': 'volume_ratio',
+                '流通市值': 'float_mv', '总市值': 'total_mv',
+                '市盈率-动态': 'pe_ttm', '市净率': 'pb',
+                '今开': 'open', '最高': 'high', '最低': 'low', '成交量': 'volume',
+                '成交额': 'amount', '振幅': 'amplitude', '涨速': 'speed',
+                '5分钟涨跌': 'pct_5min', '60日涨跌幅': 'pct_60d'
+            })
+            return df
+    except Exception as e:
+        print(f"分市场合并也失败: {e}")
+    
+    # 都失败返回空（触发错误提示）
+    return pd.DataFrame()
 
 @st.cache_data(ttl=14400)
 @retry_on_failure(max_retries=3)
@@ -1088,16 +1125,6 @@ def render_sidebar_with_technicals(top10_data, filters):
 # 主程序
 # ============================================================
 def main():
-    """主程序入口"""
-    # 验证数据范围
-    st.write("🔍 数据获取范围验证:")
-    test_result = get_stock_history("000001", days=120)
-    if not test_result.empty:
-        dates = test_result['date']
-        st.write(f"测试股票000001数据范围:")
-        st.write(f"- 最早日期: {dates.min().strftime('%Y-%m-%d')}")
-        st.write(f"- 最新日期: {dates.max().strftime('%Y-%m-%d')}")
-        st.write(f"- 总交易日数: {len(dates)}")
     
     init_g_signals()
     # ... 其余代码 ...
@@ -1249,6 +1276,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 

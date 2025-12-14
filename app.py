@@ -167,12 +167,18 @@ def is_trading_time():
 def get_latest_trade_date():
     calendar = get_trade_calendar()
     today = datetime.now(TZ).strftime('%Y%m%d')
+    
+    # 如果正在交易时间内，且今天是交易日，直接返回今天
     if is_trading_time() and today in calendar:
         return today
-    for date in calendar:
-        if date <= today:
-            return date
-    return calendar[0]
+    
+    # 否则找出 calendar 中 <= today 的最大（即最新）交易日
+    valid_dates = [date for date in calendar if date <= today]
+    if valid_dates:
+        return max(valid_dates)
+    
+    # 如果都没找到（极少见），返回日历最后一个日期
+    return calendar[-1] if calendar else today
 
 # ============================================================
 # 数据获取层
@@ -1243,6 +1249,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 

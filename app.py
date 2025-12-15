@@ -240,10 +240,33 @@ def get_stock_history(symbol, period='daily', start_date=None, end_date=None, da
             else:
                 start_date = (datetime.now(TZ) - timedelta(days=365)).strftime('%Y%m%d')
         
-        df = ak.stock_zh_a_hist(
-            symbol=symbol, period=period,
-            start_date=start_date, end_date=end_date, adjust="qfq"
-        )
+        try:
+            # 首选东方财富（更快、更全）
+            df = ak.stock_zh_a_hist(
+                symbol=symbol, period=period,
+                start_date=start_date, end_date=end_date, adjust="qfq"
+            )
+            if not df.empty:
+                return df
+        except:
+            pass
+        
+        try:
+            # 备用：新浪接口（更稳定，但有时慢）
+            df_sina = ak.stock_zh_a_daily(
+                symbol=f"sh{symbol}" if symbol.startswith('6') else f"sz{symbol}",
+                start_date=start_date[:4] + '-' + start_date[4:6] + '-' + start_date[6:],
+                end_date=end_date[:4] + '-' + end_date[4:6] + '-' + end_date[6:],
+                adjust="qfq"
+            )
+            if not df_sina.empty:
+                df_sina.columns = ['date', 'open', 'close', 'high', 'low', 'volume', 'amount', 'outstanding_share', 'turnover']
+                df_sina['date'] = pd.to_datetime(df_sina['date'])
+                return df_sina[['date', 'open', 'close', 'high', 'low', 'volume']]
+        except:
+            pass
+        
+        return pd.DataFrame()
         
         if df.empty:
             return pd.DataFrame()
@@ -1359,6 +1382,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 

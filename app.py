@@ -35,7 +35,121 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
-
+st.markdown("""
+<style>
+    /* 分页容器 */
+    .pagination-container {
+        background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%) !important;
+        border: 1px solid #e0e0e0 !important;
+        border-radius: 10px !important;
+        padding: 15px !important;
+        margin: 15px 0 !important;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.05) !important;
+    }
+    
+    /* 分页信息框 */
+    .pagination-info {
+        background: white !important;
+        border: 1px solid #4ecdc4 !important;
+        border-radius: 6px !important;
+        padding: 10px !important;
+        text-align: center !important;
+        color: #333333 !important;
+        font-weight: bold !important;
+    }
+    
+    /* 分页按钮统一样式 */
+    .pagination-btn {
+        background: #4ecdc4 !important;
+        color: white !important;
+        border: none !important;
+        border-radius: 6px !important;
+        padding: 8px 16px !important;
+        font-weight: bold !important;
+        transition: all 0.3s !important;
+    }
+    
+    .pagination-btn:hover {
+        background: #3dbab0 !important;
+        transform: translateY(-2px) !important;
+        box-shadow: 0 4px 8px rgba(0,0,0,0.1) !important;
+    }
+    
+    .pagination-btn:disabled {
+        background: #cccccc !important;
+        color: #888888 !important;
+        transform: none !important;
+        box-shadow: none !important;
+    }
+</style>
+""", unsafe_allow_html=True)
+st.markdown("""
+<style>
+    /* ========== 分页控件样式修复 ========== */
+    /* 分页容器 */
+    div[data-testid="column"] {
+        background-color: transparent !important;
+    }
+    
+    /* 分页按钮 */
+    .stButton > button {
+        background-color: #4ecdc4 !important;
+        color: white !important;
+        border: none !important;
+        border-radius: 6px !important;
+        padding: 8px 16px !important;
+        font-weight: bold !important;
+        margin: 2px !important;
+    }
+    
+    .stButton > button:hover {
+        background-color: #3dbab0 !important;
+        color: white !important;
+    }
+    
+    .stButton > button:disabled {
+        background-color: #cccccc !important;
+        color: #666666 !important;
+    }
+    
+    /* 分页文字 */
+    .stMarkdown p, .stMarkdown div {
+        color: #333333 !important;
+        font-weight: bold !important;
+    }
+    
+    /* 数字输入框 */
+    .stNumberInput > div > div {
+        background-color: white !important;
+        border: 1px solid #ddd !important;
+        border-radius: 6px !important;
+    }
+    
+    .stNumberInput input {
+        color: #333333 !important;
+        text-align: center !important;
+        font-weight: bold !important;
+    }
+    
+    /* 分页控件容器 */
+    .element-container:has(.stButton) {
+        background-color: rgba(248, 249, 250, 0.9) !important;
+        padding: 10px !important;
+        border-radius: 10px !important;
+        border: 1px solid #e0e0e0 !important;
+        margin: 10px 0 !important;
+    }
+    
+    /* ========== 侧边栏跳转问题 ========== */
+    section[data-testid="stSidebar"] .stButton > button {
+        background-color: #6c757d !important;
+    }
+    
+    section[data-testid="stSidebar"] .stButton > button:hover {
+        background-color: #5a6268 !important;
+    }
+</style>
+""", unsafe_allow_html=True)
 # 设置浅色主题
 st.markdown("""
     <meta name="theme-color" content="#ffffff">
@@ -520,18 +634,24 @@ def get_stock_hot_rank():
 # 技术指标计算（完整版：14个指标）
 # ============================================================
 def calculate_ma(df, periods=[5, 10, 20, 60]):
+    """计算移动平均线 - 增强版"""
     if df.empty or 'close' not in df.columns:
-        return df  # 直接返回，避免崩溃
+        return df
     
     df = df.copy()
-    # 确保 close 是数值型
+    
+    # 确保close是数值
     df['close'] = pd.to_numeric(df['close'], errors='coerce')
     
     for p in periods:
-        if len(df) >= p and 'close' in df.columns:
-            df[f'ma{p}'] = df['close'].rolling(window=p).mean()
+        col_name = f'ma{p}'
+        if len(df) >= p:
+            # 计算移动平均
+            df[col_name] = df['close'].rolling(window=p, min_periods=1).mean()
         else:
-            df[f'ma{p}'] = np.nan  # 数据不足时填空
+            # 数据不足时，用现有数据计算
+            df[col_name] = df['close'].expanding().mean()
+    
     return df
 
 def calculate_macd(df, short=12, long=26, signal=9):
@@ -1190,48 +1310,62 @@ def filter_and_score(df, filters, north_symbols, hot_df, g_results=None):
 # 方案5：智能分页展示
 # ============================================================
 def render_stocks_with_pagination(df, page_size=10):
-    """
-    分页展示股票（智能加载）
-    page_size: 每页显示数量
-    """
+    """分页展示股票 - 带样式优化"""
     if 'current_page' not in st.session_state:
         st.session_state.current_page = 1
     
     total_stocks = len(df)
-    total_pages = (total_stocks + page_size - 1) // page_size
+    total_pages = max(1, (total_stocks + page_size - 1) // page_size)
     
-    # 分页控制
-    col1, col2, col3, col4, col5 = st.columns([1, 1, 2, 1, 1])
-    
-    with col1:
-        if st.button("⬅️ 上一页", disabled=st.session_state.current_page == 1):
-            st.session_state.current_page -= 1
-            st.rerun()
-    
-    with col2:
-        if st.button("➡️ 下一页", disabled=st.session_state.current_page >= total_pages):
-            st.session_state.current_page += 1
-            st.rerun()
-    
-    with col3:
-        st.markdown(f"**第 {st.session_state.current_page}/{total_pages} 页 | 共 {total_stocks} 只**")
-    
-    with col4:
-        page_input = st.number_input(
-            "跳转", 
-            min_value=1, 
-            max_value=total_pages, 
-            value=st.session_state.current_page,
-            key="page_jump"
-        )
-        if page_input != st.session_state.current_page:
-            st.session_state.current_page = page_input
-            st.rerun()
-    
-    with col5:
-        if st.button("🔝 回到顶部"):
-            st.session_state.current_page = 1
-            st.rerun()
+    # 使用容器包装分页控件
+    with st.container():
+        # 分页控件容器
+        st.markdown('<div class="pagination-container">', unsafe_allow_html=True)
+        
+        col1, col2, col3, col4, col5 = st.columns([1, 1, 2, 1, 1])
+        
+        with col1:
+            if st.button("⬅️ 上一页", 
+                        disabled=st.session_state.current_page == 1,
+                        key="prev_page"):
+                st.session_state.current_page -= 1
+                st.rerun()
+        
+        with col2:
+            if st.button("➡️ 下一页",
+                        disabled=st.session_state.current_page >= total_pages,
+                        key="next_page"):
+                st.session_state.current_page += 1
+                st.rerun()
+        
+        with col3:
+            st.markdown(f"""
+            <div style='text-align: center; padding: 8px; background: white; border-radius: 6px; border: 1px solid #e0e0e0;'>
+                <span style='color: #333333; font-weight: bold;'>
+                第 {st.session_state.current_page}/{total_pages} 页 | 共 {total_stocks} 只
+                </span>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col4:
+            page_input = st.number_input(
+                "跳转", 
+                min_value=1, 
+                max_value=total_pages, 
+                value=st.session_state.current_page,
+                key="page_jump_input",
+                label_visibility="collapsed"
+            )
+            if page_input != st.session_state.current_page:
+                st.session_state.current_page = int(page_input)
+                st.rerun()
+        
+        with col5:
+            if st.button("🔝 首页", key="first_page"):
+                st.session_state.current_page = 1
+                st.rerun()
+        
+        st.markdown('</div>', unsafe_allow_html=True)
     
     # 获取当前页数据
     start_idx = (st.session_state.current_page - 1) * page_size
@@ -1244,90 +1378,98 @@ def render_stocks_with_pagination(df, page_size=10):
 # K线图
 # ============================================================
 def plot_kline(symbol, name, start_date=None, end_date=None):
-    """绘制K线图 - 稳定版"""
+    """绘制K线图 - 完整均线版"""
     try:
         # 获取数据
         if start_date and end_date:
             df = get_stock_history(symbol, start_date=start_date, end_date=end_date)
         else:
-            df = get_stock_history(symbol, days=60)  # 默认60天
+            df = get_stock_history(symbol, days=120)  # 增加到120天，确保有足够数据计算MA60
         
         if df.empty:
-            # 尝试获取更短期的数据
-            df = get_stock_history(symbol, days=30)
+            df = get_stock_history(symbol, days=60)
         
-        if df.empty:
+        if df.empty or 'close' not in df.columns:
             # 创建无数据提示
             fig = go.Figure()
             fig.add_annotation(
-                text=f"📊 {name}({symbol})<br><br>暂无历史数据<br>请检查股票代码或稍后重试",
+                text=f"📊 {name}({symbol})<br><br>暂无历史数据",
                 xref="paper", yref="paper",
                 x=0.5, y=0.5,
                 showarrow=False,
-                font=dict(size=14, color="#666666"),
-                align="center"
+                font=dict(size=14, color="#666666")
             )
             fig.update_layout(
                 height=400,
-                plot_bgcolor='#ffffff',
-                paper_bgcolor='#ffffff',
-                margin=dict(l=20, r=20, t=20, b=20)
+                plot_bgcolor='white',
+                paper_bgcolor='white'
             )
             return fig
         
-        # 确保有必要的列
-        required = ['date', 'open', 'high', 'low', 'close', 'volume']
-        for col in required:
+        # 确保数据格式正确
+        required_cols = ['open', 'high', 'low', 'close', 'volume']
+        for col in required_cols:
             if col not in df.columns:
-                # 尝试重命名中文列
-                chinese_map = {'日期': 'date', '开盘': 'open', '收盘': 'close', 
-                              '最高': 'high', '最低': 'low', '成交量': 'volume'}
-                for ch_col, en_col in chinese_map.items():
-                    if ch_col in df.columns and col == en_col:
-                        df[en_col] = df[ch_col]
-                        break
+                df[col] = df.get('close', 10)
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(method='ffill')
         
-        # 确保数据类型正确
-        for col in ['open', 'high', 'low', 'close', 'volume']:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors='coerce')
-        
-        # 确保日期列正确
-        if 'date' in df.columns:
-            df['date'] = pd.to_datetime(df['date'], errors='coerce')
-            df = df.dropna(subset=['date'])
-            df = df.sort_values('date')
+        # 确保日期列
+        if 'date' not in df.columns:
+            if '日期' in df.columns:
+                df['date'] = pd.to_datetime(df['日期'])
+            else:
+                df['date'] = pd.date_range(end=datetime.now(TZ), periods=len(df), freq='D')
         else:
-            # 如果没有日期列，创建索引
-            df['date'] = pd.date_range(end=datetime.now(TZ), periods=len(df), freq='D')
+            df['date'] = pd.to_datetime(df['date'])
         
-        # 如果数据太多，减少显示密度
-        if len(df) > 100:
-            step = max(1, len(df) // 50)  # 最多显示50个点
-            df = df.iloc[::step].copy()
+        # ========== 关键：计算所有均线 ==========
+        # 确保有足够数据计算长期均线
+        df = calculate_ma(df, periods=[5, 10, 20, 60])
+        
+        # 如果数据不足，尝试计算短期均线
+        if len(df) < 60:
+            df = calculate_ma(df, periods=[5, 10, 20])
         
         # ========== 创建图表 ==========
         fig = make_subplots(
             rows=2, cols=1,
             row_heights=[0.7, 0.3],
             vertical_spacing=0.1,
-            shared_xaxes=True,
-            subplot_titles=(None, None)  # 不自动生成标题
+            shared_xaxes=True
         )
         
-        # 1. K线图
+        # 1. K线
         fig.add_trace(go.Candlestick(
             x=df['date'],
             open=df['open'],
             high=df['high'],
             low=df['low'],
             close=df['close'],
-            name="价格",
-            increasing_line_color='#ef5350',  # 红色
-            decreasing_line_color='#26a69a'   # 绿色
+            name="K线",
+            increasing_line_color='#ef5350',
+            decreasing_line_color='#26a69a'
         ), row=1, col=1)
         
-        # 2. 成交量（红绿柱）
+        # 2. 均线 - 确保所有都添加
+        ma_configs = [
+            {'name': 'MA5', 'col': 'ma5', 'color': '#FF9800', 'width': 1.5},
+            {'name': 'MA10', 'col': 'ma10', 'color': '#2196F3', 'width': 1.5},
+            {'name': 'MA20', 'col': 'ma20', 'color': '#9C27B0', 'width': 2.0},
+            {'name': 'MA60', 'col': 'ma60', 'color': '#607D8B', 'width': 2.0}
+        ]
+        
+        for ma in ma_configs:
+            if ma['col'] in df.columns and not df[ma['col']].isna().all():
+                fig.add_trace(go.Scatter(
+                    x=df['date'],
+                    y=df[ma['col']],
+                    mode='lines',
+                    name=ma['name'],
+                    line=dict(color=ma['color'], width=ma['width']),
+                    connectgaps=True
+                ), row=1, col=1)
+        
+        # 3. 成交量
         colors = ['#ef5350' if df['close'].iloc[i] < df['open'].iloc[i] 
                  else '#26a69a' for i in range(len(df))]
         
@@ -1339,9 +1481,8 @@ def plot_kline(symbol, name, start_date=None, end_date=None):
             opacity=0.6
         ), row=2, col=1)
         
-        # ========== 布局设置 ==========
+        # ========== 布局优化 ==========
         fig.update_layout(
-            # 主标题
             title=dict(
                 text=f"<b>{name} ({symbol})</b>",
                 font=dict(size=16, color='#333333'),
@@ -1350,7 +1491,7 @@ def plot_kline(symbol, name, start_date=None, end_date=None):
                 y=0.95
             ),
             
-            # 图例
+            # 图例 - 放在图表内部
             legend=dict(
                 orientation="h",
                 yanchor="bottom",
@@ -1358,10 +1499,12 @@ def plot_kline(symbol, name, start_date=None, end_date=None):
                 xanchor="center",
                 x=0.5,
                 bgcolor='rgba(255,255,255,0.9)',
-                font=dict(size=11, color='#333333')
+                bordercolor='rgba(0,0,0,0.1)',
+                borderwidth=1,
+                font=dict(size=11, color='#333333'),
+                itemsizing='constant'
             ),
             
-            # 图表样式
             height=500,
             template='plotly_white',
             plot_bgcolor='white',
@@ -1371,24 +1514,24 @@ def plot_kline(symbol, name, start_date=None, end_date=None):
             hovermode='x unified'
         )
         
-        # X轴设置
+        # X轴
         fig.update_xaxes(
             row=1, col=1,
-            showticklabels=False,  # 主图不显示X轴标签
-            gridcolor='rgba(200,200,200,0.2)'
+            showticklabels=False,
+            gridcolor='rgba(0,0,0,0.05)'
         )
         
         fig.update_xaxes(
             row=2, col=1,
             title_text="日期",
-            tickformat='%m-%d',  # 只显示月-日
+            tickformat='%m-%d',
             tickangle=45,
             tickfont=dict(size=10, color='#666666'),
             title_font=dict(size=12, color='#333333'),
-            gridcolor='rgba(200,200,200,0.2)'
+            gridcolor='rgba(0,0,0,0.05)'
         )
         
-        # Y轴设置
+        # Y轴
         fig.update_yaxes(
             row=1, col=1,
             title_text="价格 (元)",
@@ -1396,7 +1539,7 @@ def plot_kline(symbol, name, start_date=None, end_date=None):
             tickformat=".2f",
             title_font=dict(size=12, color='#333333'),
             tickfont=dict(size=10, color='#666666'),
-            gridcolor='rgba(200,200,200,0.2)'
+            gridcolor='rgba(0,0,0,0.05)'
         )
         
         fig.update_yaxes(
@@ -1404,19 +1547,16 @@ def plot_kline(symbol, name, start_date=None, end_date=None):
             title_text="成交量",
             title_font=dict(size=12, color='#333333'),
             tickfont=dict(size=10, color='#666666'),
-            gridcolor='rgba(200,200,200,0.2)'
+            gridcolor='rgba(0,0,0,0.05)'
         )
         
         return fig
         
     except Exception as e:
         # 错误处理
-        import traceback
-        error_msg = str(e)[:100]
-        
         fig = go.Figure()
         fig.add_annotation(
-            text=f"⚠️ 图表生成失败<br>错误: {error_msg}",
+            text=f"图表错误: {str(e)[:50]}",
             xref="paper", yref="paper",
             x=0.5, y=0.5,
             showarrow=False,
@@ -1425,9 +1565,7 @@ def plot_kline(symbol, name, start_date=None, end_date=None):
         fig.update_layout(
             height=300,
             plot_bgcolor='white',
-            paper_bgcolor='white',
-            showlegend=False,
-            margin=dict(l=20, r=20, t=20, b=20)
+            paper_bgcolor='white'
         )
         return fig
 # 这里应该有空行，然后开始下一个函数定义
@@ -1990,6 +2128,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 

@@ -229,7 +229,7 @@ def get_all_stocks_realtime():
 @st.cache_data(ttl=14400)
 @retry_on_failure(max_retries=3)
 def get_stock_history(symbol, period='daily', start_date=None, end_date=None, days=None):
-    """支持自定义日期范围"""
+    """支持自定义日期范围 - 增强稳定性版"""
     try:
         if end_date is None:
             end_date = datetime.now(TZ).strftime('%Y%m%d')
@@ -240,42 +240,103 @@ def get_stock_history(symbol, period='daily', start_date=None, end_date=None, da
             else:
                 start_date = (datetime.now(TZ) - timedelta(days=365)).strftime('%Y%m%d')
         
+        # 方法1：东方财富接口（最常用）
         try:
-            # 首选东方财富（更快、更全）
             df = ak.stock_zh_a_hist(
-                symbol=symbol, period=period,
-                start_date=start_date, end_date=end_date, adjust="qfq"
+                symbol=symbol, 
+                period=period,
+                start_date=start_date, 
+                end_date=end_date, 
+                adjust="qfq"
             )
             if not df.empty:
-                return df
-        except:
-            pass
+                # 重命名列为标准格式
+                if '日期' in df.columns:
+                    df = df.rename(columns={
+                        '日期': 'date',
+                        '开盘': 'open',
+                        '收盘': 'close',
+                        '最高': 'high',
+                        '最低': 'low',
+                        '成交量': 'volume',
+                        '成交额': 'amount',
+                        '振幅': 'amplitude',
+                        '涨跌幅': 'pct_chg',
+                        '涨跌额': 'change',
+                        '换手率': 'turnover'
+                    })
+                df['date'] = pd.to_datetime(df['date'])
+                return df[['date', 'open', 'close', 'high', 'low', 'volume']]
+        except Exception as e1:
+            st.warning(f"东方财富接口失败: {e1}")
         
+        # 方法2：新浪接口（备用）
         try:
-            # 备用：新浪接口（更稳定，但有时慢）
+            market = "sh" if symbol.startswith('6') else "sz"
             df_sina = ak.stock_zh_a_daily(
-                symbol=f"sh{symbol}" if symbol.startswith('6') else f"sz{symbol}",
+                symbol=f"{market}{symbol}",
                 start_date=start_date[:4] + '-' + start_date[4:6] + '-' + start_date[6:],
                 end_date=end_date[:4] + '-' + end_date[4:6] + '-' + end_date[6:],
                 adjust="qfq"
             )
             if not df_sina.empty:
-                df_sina.columns = ['date', 'open', 'close', 'high', 'low', 'volume', 'amount', 'outstanding_share', 'turnover']
+                df_sina = df_sina.rename(columns={
+                    'date': 'date',
+                    'open': 'open',
+                    'close': 'close',
+                    'high': 'high',
+                    'low': 'low',
+                    'volume': 'volume'
+                })
                 df_sina['date'] = pd.to_datetime(df_sina['date'])
                 return df_sina[['date', 'open', 'close', 'high', 'low', 'volume']]
+        except Exception as e2:
+            st.warning(f"新浪接口失败: {e2}")
+        
+        # 方法3：雅虎财经（国际备用）
+        try:
+            yahoo_symbol = f"{symbol}.SS" if symbol.startswith('6') else f"{symbol}.SZ"
+            import yfinance as yf
+            df_yahoo = yf.download(yahoo_symbol, start=start_date, end=end_date)
+            if not df_yahoo.empty:
+                df_yahoo = df_yahoo.reset_index()
+                df_yahoo = df_yahoo.rename(columns={
+                    'Date': 'date',
+                    'Open': 'open',
+                    'Close': 'close',
+                    'High': 'high',
+                    'Low': 'low',
+                    'Volume': 'volume'
+                })
+                df_yahoo['date'] = pd.to_datetime(df_yahoo['date'])
+                return df_yahoo[['date', 'open', 'close', 'high', 'low', 'volume']]
         except:
             pass
         
-        return pd.DataFrame()
+        # 方法4：生成模拟数据（最后手段）
+        st.warning("⚠️ 数据源不可用，生成模拟数据供演示")
+        date_range = pd.date_range(start=start_date, end=end_date, freq='D')
+        np.random.seed(int(symbol))
+        base_price = 10 + np.random.rand() * 90
+        returns = np.random.randn(len(date_range)) * 0.02
         
-        if df.empty:
-            return pd.DataFrame()
+        prices = [base_price]
+        for r in returns:
+            prices.append(prices[-1] * (1 + r))
+        prices = prices[1:]
         
-        df.columns = ['date', 'open', 'close', 'high', 'low', 'volume', 
-                      'amount', 'amplitude', 'pct_chg', 'chg', 'turnover']
-        df['date'] = pd.to_datetime(df['date'])
-        return df
-    except:
+        df_sim = pd.DataFrame({
+            'date': date_range,
+            'open': [p * (1 + np.random.rand() * 0.02 - 0.01) for p in prices],
+            'close': prices,
+            'high': [p * (1 + np.random.rand() * 0.03) for p in prices],
+            'low': [p * (1 - np.random.rand() * 0.03) for p in prices],
+            'volume': np.random.randint(10000, 1000000, len(date_range))
+        })
+        return df_sim
+        
+    except Exception as e:
+        st.error(f"获取历史数据失败: {str(e)}")
         return pd.DataFrame()
 
 @st.cache_data(ttl=600)
@@ -892,73 +953,125 @@ def render_stocks_with_pagination(df, page_size=10):
 # K线图
 # ============================================================
 def plot_kline(symbol, name, start_date=None, end_date=None):
-    df = get_stock_history(symbol, start_date=start_date, end_date=end_date)
-   
-    if df.empty or 'close' not in df.columns:
+    """绘制K线图 - 增强容错版"""
+    try:
+        # 获取数据
+        df = get_stock_history(symbol, start_date=start_date, end_date=end_date)
+        
+        if df.empty:
+            # 尝试获取最近60天数据
+            df = get_stock_history(symbol, days=60)
+        
+        if df.empty or 'close' not in df.columns:
+            # 创建友好的错误提示图表
+            fig = go.Figure()
+            fig.add_annotation(
+                text=f"⚠️ 数据暂时不可用<br>{name}({symbol})<br><br>可能原因：<br>• 数据源维护中<br>• 网络连接问题<br>• 股票代码错误<br><br>请稍后重试或使用其他股票",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5,
+                showarrow=False,
+                font=dict(size=16, color="gray"),
+                align="center"
+            )
+            fig.update_layout(
+                height=400,
+                template='plotly_white',
+                title=f"{name} ({symbol})",
+                showlegend=False,
+                xaxis=dict(visible=False),
+                yaxis=dict(visible=False)
+            )
+            return fig
+        
+        # 确保必要列存在
+        required_cols = ['open', 'high', 'low', 'close', 'volume']
+        for col in required_cols:
+            if col not in df.columns:
+                df[col] = df.get('close', 10)  # 用收盘价填充
+            
+            # 转换为数值类型
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(method='ffill').fillna(10)
+        
+        # 计算技术指标（如果数据足够）
+        if len(df) >= 5:
+            try:
+                df = calculate_ma(df)
+            except:
+                pass
+        
+        # 创建图表
+        fig = make_subplots(
+            rows=2, cols=1,
+            row_heights=[0.7, 0.3],
+            subplot_titles=(f'{name}({symbol}) K线图', '成交量'),
+            vertical_spacing=0.1
+        )
+        
+        # K线
+        fig.add_trace(go.Candlestick(
+            x=df['date'],
+            open=df['open'],
+            high=df['high'],
+            low=df['low'],
+            close=df['close'],
+            increasing_line_color='red',
+            decreasing_line_color='green',
+            name="K线"
+        ), row=1, col=1)
+        
+        # 简单均线（如果计算了）
+        if 'ma5' in df.columns:
+            fig.add_trace(go.Scatter(
+                x=df['date'], y=df['ma5'],
+                mode='lines', name='MA5',
+                line=dict(color='orange', width=1)
+            ), row=1, col=1)
+        
+        if 'ma10' in df.columns:
+            fig.add_trace(go.Scatter(
+                x=df['date'], y=df['ma10'],
+                mode='lines', name='MA10',
+                line=dict(color='blue', width=1)
+            ), row=1, col=1)
+        
+        # 成交量
+        colors = ['green' if df['close'].iloc[i] >= df['open'].iloc[i] 
+                 else 'red' for i in range(len(df))]
+        
+        fig.add_trace(go.Bar(
+            x=df['date'],
+            y=df['volume'],
+            marker_color=colors,
+            name="成交量"
+        ), row=2, col=1)
+        
+        # 布局设置
+        fig.update_layout(
+            height=500,
+            template='plotly_white',
+            xaxis_rangeslider_visible=False,
+            showlegend=True,
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+        )
+        
+        # 隐藏第二个子图的x轴标题
+        fig.update_xaxes(title_text="", row=2, col=1)
+        fig.update_yaxes(title_text="价格", row=1, col=1)
+        fig.update_yaxes(title_text="成交量", row=2, col=1)
+        
+        return fig
+        
+    except Exception as e:
+        # 极端情况下的回退
         fig = go.Figure()
         fig.add_annotation(
-            text=f"暂无股票 {symbol} {name} 的有效数据<br>可能原因：代码错误 / 数据源暂不可用",
+            text=f"图表生成错误<br>{str(e)[:100]}...",
             xref="paper", yref="paper",
             x=0.5, y=0.5, showarrow=False,
-            font_size=16
+            font=dict(size=14, color="red")
         )
-        fig.update_layout(height=600, template='plotly_white')
+        fig.update_layout(height=300, template='plotly_white')
         return fig
-   
-    # 防御：确保必要列存在并转为数值
-    required_cols = ['open', 'high', 'low', 'close', 'volume']
-    for col in required_cols:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors='coerce')
-        else:
-            df[col] = np.nan
-    
-    df = calculate_ma(df)
-    df = calculate_macd(df)
-   
-    fig = make_subplots(
-        rows=2, cols=1,
-        row_heights=[0.7, 0.3],
-        subplot_titles=(f'{name}({symbol}) K线图', 'MACD')
-    )
-   
-    # K线（红涨绿跌）
-    fig.add_trace(go.Candlestick(
-        x=df['date'],
-        open=df['open'],
-        high=df['high'],
-        low=df['low'],
-        close=df['close'],
-        increasing_line_color='red',
-        decreasing_line_color='green',
-        name="K线"
-    ), row=1, col=1)
-   
-    # 均线
-    colors = ['orange', 'blue', 'purple', 'gray']
-    for i, p in enumerate([5, 10, 20, 60]):
-        if f'ma{p}' in df.columns:
-            fig.add_trace(go.Scatter(
-                x=df['date'], y=df[f'ma{p}'],
-                mode='lines', name=f'MA{p}',
-                line=dict(color=colors[i % len(colors)], width=2)
-            ), row=1, col=1)
-   
-    # MACD
-    if 'macd' in df.columns and not df['macd'].isna().all():
-        fig.add_trace(go.Bar(
-            x=df['date'], y=df['macd'],
-            marker_color=np.where(df['macd'] > 0, 'red', 'green'),
-            name="MACD"
-        ), row=2, col=1)
-   
-    fig.update_layout(
-        height=600,
-        template='plotly_white',
-        xaxis_rangeslider_visible=False,
-        title_text=f"{name} ({symbol})"
-    )
-    return fig
 # ============================================================
 # AI助手
 # ============================================================
@@ -1497,6 +1610,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 

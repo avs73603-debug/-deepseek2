@@ -909,7 +909,7 @@ def calculate_market_attention(code, hot_df):
 # 方案4：多线程并行技术指标计算
 # ============================================================
 def calculate_tech_signals_parallel(symbols, enabled_filters):
-    """多线程并行计算技术指标 - 增强容错版"""
+    """多线程并行计算技术指标 - 修复进度条版"""
     results = {}
     lock = threading.Lock()
     
@@ -917,96 +917,78 @@ def calculate_tech_signals_parallel(symbols, enabled_filters):
         """单只股票的技术指标检测"""
         try:
             hist_df = get_stock_history(symbol, days=60)
-            if hist_df.empty or len(hist_df) < 20:  # 至少需要20天数据
+            if hist_df.empty or len(hist_df) < 20:
                 return symbol, {}
             
             signals = {}
             
-            # 根据启用的筛选条件检测对应指标（每个都加try-catch）
+            # 根据启用的筛选条件检测对应指标
             if enabled_filters.get('macd_golden'):
-                try:
-                    signals['macd_golden'] = detect_macd_golden(hist_df)
-                except:
-                    signals['macd_golden'] = False
+                signals['macd_golden'] = detect_macd_golden(hist_df)
             
             if enabled_filters.get('macd_double_golden'):
-                try:
-                    signals['macd_double_golden'] = detect_macd_double_golden(hist_df)
-                except:
-                    signals['macd_double_golden'] = False
+                signals['macd_double_golden'] = detect_macd_double_golden(hist_df)
             
             if enabled_filters.get('macd_low_golden'):
-                try:
-                    signals['macd_low_golden'] = detect_macd_low_golden(hist_df)
-                except:
-                    signals['macd_low_golden'] = False
+                signals['macd_low_golden'] = detect_macd_low_golden(hist_df)
             
             if enabled_filters.get('macd_turn_up'):
-                try:
-                    signals['macd_turn_up'] = detect_macd_turn_up(hist_df)
-                except:
-                    signals['macd_turn_up'] = False
+                signals['macd_turn_up'] = detect_macd_turn_up(hist_df)
             
             if enabled_filters.get('kdj_golden'):
-                try:
-                    signals['kdj_golden'] = detect_kdj_golden(hist_df)
-                except:
-                    signals['kdj_golden'] = False
+                signals['kdj_golden'] = detect_kdj_golden(hist_df)
             
             if enabled_filters.get('kdj_double_golden'):
-                try:
-                    signals['kdj_double_golden'] = detect_kdj_double_golden(hist_df)
-                except:
-                    signals['kdj_double_golden'] = False
+                signals['kdj_double_golden'] = detect_kdj_double_golden(hist_df)
             
             if enabled_filters.get('kdj_low_golden'):
-                try:
-                    signals['kdj_low_golden'] = detect_kdj_low_golden(hist_df)
-                except:
-                    signals['kdj_low_golden'] = False
+                signals['kdj_low_golden'] = detect_kdj_low_golden(hist_df)
             
             if enabled_filters.get('kdj_turn_up'):
-                try:
-                    signals['kdj_turn_up'] = detect_kdj_turn_up(hist_df)
-                except:
-                    signals['kdj_turn_up'] = False
+                signals['kdj_turn_up'] = detect_kdj_turn_up(hist_df)
             
             if enabled_filters.get('expma_golden'):
-                try:
-                    signals['expma_golden'] = detect_expma_golden(hist_df)
-                except Exception as e:
-                    signals['expma_golden'] = False
+                signals['expma_golden'] = detect_expma_golden(hist_df)
             
             if enabled_filters.get('wr_oversold'):
-                try:
-                    signals['wr_oversold'] = detect_wr_oversold(hist_df)
-                except:
-                    signals['wr_oversold'] = False
+                signals['wr_oversold'] = detect_wr_oversold(hist_df)
             
             if enabled_filters.get('rsi_oversold'):
-                try:
-                    signals['rsi_oversold'] = detect_rsi_oversold(hist_df)
-                except:
-                    signals['rsi_oversold'] = False
+                signals['rsi_oversold'] = detect_rsi_oversold(hist_df)
             
             if enabled_filters.get('one_yang_three_lines'):
-                try:
-                    signals['one_yang_three_lines'] = detect_one_yang_three_lines(hist_df)
-                except:
-                    signals['one_yang_three_lines'] = False
+                signals['one_yang_three_lines'] = detect_one_yang_three_lines(hist_df)
             
             return symbol, signals
         except Exception as e:
-            # 整个股票处理失败，返回空信号
+            # 单个股票处理失败，返回空信号
             return symbol, {}
+    
+    # 限制处理数量
+    symbols = symbols[:min(200, len(symbols))]
+    
+    # ========== 修复进度条逻辑 ==========
+    # 只在Streamlit上下文中显示进度条
+    try:
+        import streamlit as st
+        show_progress = True
+    except:
+        show_progress = False
+    
+    progress_bar = None
+    status_text = None
+    
+    if show_progress:
+        try:
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+        except:
+            show_progress = False
     
     # 并行执行
     with ThreadPoolExecutor(max_workers=8) as executor:
         futures = {executor.submit(process_single_stock, symbol): symbol 
-                   for symbol in symbols[:200]}  # 限制数量，避免资源耗尽
-        
-        progress = st.progress(0) if 'progress' in locals() else None
-        status = st.empty() if 'status' in locals() else None
+                   for symbol in symbols}
         
         completed = 0
         total = len(futures)
@@ -1017,15 +999,24 @@ def calculate_tech_signals_parallel(symbols, enabled_filters):
                 results[symbol] = signals
             
             completed += 1
-            if progress:
-                progress.progress(completed / total)
-            if status:
-                status.text(f"处理: {completed}/{total}")
+            
+            # 更新进度
+            if show_progress and progress_bar and status_text:
+                try:
+                    progress_bar.progress(completed / total)
+                    status_text.text(f"处理: {completed}/{total} | 发现: {len(results)}")
+                except:
+                    pass
     
-    if 'progress' in locals():
-        progress.empty()
-    if 'status' in locals():
-        status.empty()
+    # 清理进度条
+    if show_progress:
+        try:
+            if progress_bar:
+                progress_bar.empty()
+            if status_text:
+                status_text.empty()
+        except:
+            pass
     
     return results
 # ============================================================
@@ -1252,36 +1243,55 @@ def filter_and_score(df, filters, north_symbols, hot_df, g_results=None):
     need_tech = len(enabled_tech_filters) > 0
     
     if need_tech:
+        # 显示进度信息（不使用进度条）
+        status_info = st.empty()
+        status_info.info(f"🔍 正在计算 {len(enabled_tech_filters)} 个技术指标...")
+        
         # 多线程并行计算技术指标
-        st.info(f"⚙️ 并行计算 {len(enabled_tech_filters)} 个技术指标...")
         calc_limit = min(200, len(df))
         symbols = df.head(calc_limit)['code'].tolist()
         
-        tech_signals_map = calculate_tech_signals_parallel(symbols, enabled_tech_filters)
+        try:
+            tech_signals_map = calculate_tech_signals_parallel(symbols, enabled_tech_filters)
+            status_info.success(f"✅ 技术指标计算完成")
+        except Exception as e:
+            status_info.error(f"❌ 技术指标计算出错: {str(e)[:100]}")
+            tech_signals_map = {}
+        
+        # 清空状态信息
+        time_module.sleep(1)
+        status_info.empty()
         
         # 应用技术指标筛选
-        filtered_codes = []
-        for _, row in df.iterrows():
-            symbol = row['code']
-            signals = tech_signals_map.get(symbol, {})
+        if tech_signals_map:
+            filtered_codes = []
+            for _, row in df.iterrows():
+                symbol = row['code']
+                signals = tech_signals_map.get(symbol, {})
+                
+                # 检查是否满足所有启用的技术指标
+                pass_filter = True
+                for tech_key, tech_enabled in enabled_tech_filters.items():
+                    if tech_enabled and not signals.get(tech_key, False):
+                        pass_filter = False
+                        break
+                
+                if pass_filter:
+                    filtered_codes.append(symbol)
             
-            # 检查是否满足所有启用的技术指标
-            pass_filter = True
-            for tech_key, tech_enabled in enabled_tech_filters.items():
-                if tech_enabled and not signals.get(tech_key, False):
-                    pass_filter = False
-                    break
-            
-            if pass_filter:
-                filtered_codes.append(symbol)
-        
-        df = df[df['code'].isin(filtered_codes)]
-        df['tech_signals'] = df['code'].map(lambda x: tech_signals_map.get(x, {}))
+            df = df[df['code'].isin(filtered_codes)]
+            df['tech_signals'] = df['code'].map(lambda x: tech_signals_map.get(x, {}))
+        else:
+            # 技术指标计算失败，跳过技术筛选
+            st.warning("⚠️ 技术指标计算失败，跳过技术筛选")
+            df['tech_signals'] = [{} for _ in range(len(df))]
         
         if debug_mode:
             st.write(f"- 技术指标筛选后: {len(df)}只")
     else:
         df['tech_signals'] = [{} for _ in range(len(df))]
+    
+    # ... [后面的代码不变] ...
     
     # 打分（向量化 vs 逐行）
     if need_tech:
@@ -2128,6 +2138,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 

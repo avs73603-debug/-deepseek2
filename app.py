@@ -398,12 +398,35 @@ def calculate_kdj(df, n=9):
     return df
 
 def calculate_expma(df, short=12, long=50):
-    if df.empty or len(df) < long:
+    """计算EXPMA指标 - 增强容错版"""
+    if df.empty or len(df) < max(short, long):
+        # 返回原始数据，避免后续KeyError
+        df = df.copy()
+        df['expma_short'] = np.nan
+        df['expma_long'] = np.nan
         return df
-    df = df.copy()
-    df['expma_short'] = df['close'].ewm(span=short, adjust=False).mean()
-    df['expma_long'] = df['close'].ewm(span=long, adjust=False).mean()
-    return df
+    
+    try:
+        df = df.copy()
+        # 确保close列存在且为数值
+        if 'close' not in df.columns:
+            df['expma_short'] = np.nan
+            df['expma_long'] = np.nan
+            return df
+        
+        df['close'] = pd.to_numeric(df['close'], errors='coerce')
+        
+        # 计算EXPMA
+        df['expma_short'] = df['close'].ewm(span=short, adjust=False).mean()
+        df['expma_long'] = df['close'].ewm(span=long, adjust=False).mean()
+        
+        return df
+    except Exception as e:
+        # 出错时返回带有NaN列的DataFrame
+        df = df.copy()
+        df['expma_short'] = np.nan
+        df['expma_long'] = np.nan
+        return df
 
 def calculate_wr(df, n=14):
     if df.empty or len(df) < n:
@@ -431,12 +454,41 @@ def calculate_rsi(df, n=14):
 # 技术信号检测（14个独立检测函数）
 # ============================================================
 def detect_macd_golden(df):
-    """MACD金叉"""
-    df = calculate_macd(df)
-    if len(df) < 2:
+    """MACD金叉 - 容错版"""
+    try:
+        df = calculate_macd(df)
+        if len(df) < 2 or 'dif' not in df.columns or 'dea' not in df.columns:
+            return False
+        
+        # 检查NaN值
+        if pd.isna(df['dif'].iloc[-1]) or pd.isna(df['dea'].iloc[-1]):
+            return False
+        if pd.isna(df['dif'].iloc[-2]) or pd.isna(df['dea'].iloc[-2]):
+            return False
+        
+        return (df['dif'].iloc[-1] > df['dea'].iloc[-1] and 
+                df['dif'].iloc[-2] <= df['dea'].iloc[-2])
+    except:
         return False
-    return (df['dif'].iloc[-1] > df['dea'].iloc[-1] and 
-            df['dif'].iloc[-2] <= df['dea'].iloc[-2])
+
+def detect_kdj_golden(df):
+    """KDJ金叉 - 容错版"""
+    try:
+        df = calculate_kdj(df)
+        if len(df) < 2 or 'k' not in df.columns or 'd' not in df.columns:
+            return False
+        
+        if pd.isna(df['k'].iloc[-1]) or pd.isna(df['d'].iloc[-1]):
+            return False
+        if pd.isna(df['k'].iloc[-2]) or pd.isna(df['d'].iloc[-2]):
+            return False
+        
+        return (df['k'].iloc[-1] > df['d'].iloc[-1] and 
+                df['k'].iloc[-2] <= df['d'].iloc[-2])
+    except:
+        return False
+
+# 对其他检测函数做类似修改...
 
 def detect_macd_double_golden(df):
     """MACD二次金叉"""
@@ -501,12 +553,30 @@ def detect_kdj_turn_up(df):
     return (df['k'].iloc[-1] > df['k'].iloc[-2] > df['k'].iloc[-3])
 
 def detect_expma_golden(df):
-    """EXPMA金叉"""
-    df = calculate_expma(df)
-    if len(df) < 2:
+    """EXPMA金叉 - 增强容错版"""
+    try:
+        df = calculate_expma(df)
+        
+        if df.empty or len(df) < 2:
+            return False
+        
+        # 检查必要的列是否存在
+        if 'expma_short' not in df.columns or 'expma_long' not in df.columns:
+            return False
+        
+        # 检查是否有有效数据
+        if pd.isna(df['expma_short'].iloc[-1]) or pd.isna(df['expma_long'].iloc[-1]):
+            return False
+        if pd.isna(df['expma_short'].iloc[-2]) or pd.isna(df['expma_long'].iloc[-2]):
+            return False
+        
+        # 判断金叉
+        current_golden = df['expma_short'].iloc[-1] > df['expma_long'].iloc[-1]
+        prev_golden = df['expma_short'].iloc[-2] <= df['expma_long'].iloc[-2]
+        
+        return current_golden and prev_golden
+    except Exception:
         return False
-    return (df['expma_short'].iloc[-1] > df['expma_long'].iloc[-1] and 
-            df['expma_short'].iloc[-2] <= df['expma_long'].iloc[-2])
 
 def detect_wr_oversold(df):
     """W&R超卖"""
@@ -558,65 +628,125 @@ def calculate_market_attention(code, hot_df):
 # 方案4：多线程并行技术指标计算
 # ============================================================
 def calculate_tech_signals_parallel(symbols, enabled_filters):
-    """
-    多线程并行计算技术指标
-    symbols: 股票代码列表
-    enabled_filters: 启用的技术指标字典
-    返回: {code: {signal_name: bool}}
-    """
+    """多线程并行计算技术指标 - 增强容错版"""
     results = {}
     lock = threading.Lock()
     
     def process_single_stock(symbol):
         """单只股票的技术指标检测"""
-        hist_df = get_stock_history(symbol, days=60)
-        if hist_df.empty:
+        try:
+            hist_df = get_stock_history(symbol, days=60)
+            if hist_df.empty or len(hist_df) < 20:  # 至少需要20天数据
+                return symbol, {}
+            
+            signals = {}
+            
+            # 根据启用的筛选条件检测对应指标（每个都加try-catch）
+            if enabled_filters.get('macd_golden'):
+                try:
+                    signals['macd_golden'] = detect_macd_golden(hist_df)
+                except:
+                    signals['macd_golden'] = False
+            
+            if enabled_filters.get('macd_double_golden'):
+                try:
+                    signals['macd_double_golden'] = detect_macd_double_golden(hist_df)
+                except:
+                    signals['macd_double_golden'] = False
+            
+            if enabled_filters.get('macd_low_golden'):
+                try:
+                    signals['macd_low_golden'] = detect_macd_low_golden(hist_df)
+                except:
+                    signals['macd_low_golden'] = False
+            
+            if enabled_filters.get('macd_turn_up'):
+                try:
+                    signals['macd_turn_up'] = detect_macd_turn_up(hist_df)
+                except:
+                    signals['macd_turn_up'] = False
+            
+            if enabled_filters.get('kdj_golden'):
+                try:
+                    signals['kdj_golden'] = detect_kdj_golden(hist_df)
+                except:
+                    signals['kdj_golden'] = False
+            
+            if enabled_filters.get('kdj_double_golden'):
+                try:
+                    signals['kdj_double_golden'] = detect_kdj_double_golden(hist_df)
+                except:
+                    signals['kdj_double_golden'] = False
+            
+            if enabled_filters.get('kdj_low_golden'):
+                try:
+                    signals['kdj_low_golden'] = detect_kdj_low_golden(hist_df)
+                except:
+                    signals['kdj_low_golden'] = False
+            
+            if enabled_filters.get('kdj_turn_up'):
+                try:
+                    signals['kdj_turn_up'] = detect_kdj_turn_up(hist_df)
+                except:
+                    signals['kdj_turn_up'] = False
+            
+            if enabled_filters.get('expma_golden'):
+                try:
+                    signals['expma_golden'] = detect_expma_golden(hist_df)
+                except Exception as e:
+                    signals['expma_golden'] = False
+            
+            if enabled_filters.get('wr_oversold'):
+                try:
+                    signals['wr_oversold'] = detect_wr_oversold(hist_df)
+                except:
+                    signals['wr_oversold'] = False
+            
+            if enabled_filters.get('rsi_oversold'):
+                try:
+                    signals['rsi_oversold'] = detect_rsi_oversold(hist_df)
+                except:
+                    signals['rsi_oversold'] = False
+            
+            if enabled_filters.get('one_yang_three_lines'):
+                try:
+                    signals['one_yang_three_lines'] = detect_one_yang_three_lines(hist_df)
+                except:
+                    signals['one_yang_three_lines'] = False
+            
+            return symbol, signals
+        except Exception as e:
+            # 整个股票处理失败，返回空信号
             return symbol, {}
-        
-        signals = {}
-        
-        # 根据启用的筛选条件检测对应指标
-        if enabled_filters.get('macd_golden'):
-            signals['macd_golden'] = detect_macd_golden(hist_df)
-        if enabled_filters.get('macd_double_golden'):
-            signals['macd_double_golden'] = detect_macd_double_golden(hist_df)
-        if enabled_filters.get('macd_low_golden'):
-            signals['macd_low_golden'] = detect_macd_low_golden(hist_df)
-        if enabled_filters.get('macd_turn_up'):
-            signals['macd_turn_up'] = detect_macd_turn_up(hist_df)
-        
-        if enabled_filters.get('kdj_golden'):
-            signals['kdj_golden'] = detect_kdj_golden(hist_df)
-        if enabled_filters.get('kdj_double_golden'):
-            signals['kdj_double_golden'] = detect_kdj_double_golden(hist_df)
-        if enabled_filters.get('kdj_low_golden'):
-            signals['kdj_low_golden'] = detect_kdj_low_golden(hist_df)
-        if enabled_filters.get('kdj_turn_up'):
-            signals['kdj_turn_up'] = detect_kdj_turn_up(hist_df)
-        
-        if enabled_filters.get('expma_golden'):
-            signals['expma_golden'] = detect_expma_golden(hist_df)
-        if enabled_filters.get('wr_oversold'):
-            signals['wr_oversold'] = detect_wr_oversold(hist_df)
-        if enabled_filters.get('rsi_oversold'):
-            signals['rsi_oversold'] = detect_rsi_oversold(hist_df)
-        if enabled_filters.get('one_yang_three_lines'):
-            signals['one_yang_three_lines'] = detect_one_yang_three_lines(hist_df)
-        
-        return symbol, signals
     
     # 并行执行
     with ThreadPoolExecutor(max_workers=8) as executor:
         futures = {executor.submit(process_single_stock, symbol): symbol 
-                   for symbol in symbols}
+                   for symbol in symbols[:200]}  # 限制数量，避免资源耗尽
+        
+        progress = st.progress(0) if 'progress' in locals() else None
+        status = st.empty() if 'status' in locals() else None
+        
+        completed = 0
+        total = len(futures)
         
         for future in as_completed(futures):
             symbol, signals = future.result()
             with lock:
                 results[symbol] = signals
+            
+            completed += 1
+            if progress:
+                progress.progress(completed / total)
+            if status:
+                status.text(f"处理: {completed}/{total}")
+    
+    if 'progress' in locals():
+        progress.empty()
+    if 'status' in locals():
+        status.empty()
     
     return results
-
 # ============================================================
 # G信号系统
 # ============================================================
@@ -1683,3 +1813,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

@@ -1284,38 +1284,82 @@ def main():
         
         with col3:
             end_date = st.date_input("结束", datetime.now(TZ))
-        
-        if st.button("🔍 查询", type="primary"):
-            if len(query_code) == 6:
-                start_str = start_date.strftime('%Y%m%d')
-                end_str = end_date.strftime('%Y%m%d')
-                
-                hist_df = get_stock_history(query_code, start_date=start_str, end_date=end_str)
-                
-                if not hist_df.empty:
-                    stock_info = all_stocks[all_stocks['code'] == query_code]
-                    stock_name = stock_info['name'].iloc[0] if not stock_info.empty else "未知"
-                    
-                    st.success(f"✅ {len(hist_df)} 条数据")
-                    
-                    col_s1, col_s2, col_s3 = st.columns(3)
-                    with col_s1:
-                        st.metric("股票", stock_name)
-                    with col_s2:
-                        period_return = ((hist_df['close'].iloc[-1] / hist_df['close'].iloc[0]) - 1) * 100
-                        st.metric("区间涨幅", f"{period_return:.2f}%")
-                    with col_s3:
-                        st.metric("最高", f"¥{hist_df['high'].max():.2f}")
-                    
-                    fig = plot_kline(query_code, stock_name, start_str, end_str)
-                    st.plotly_chart(fig, use_container_width=True, key=f"query_kline_{query_code}")
-                else:
-                    st.error("❌ 无数据")
-            else:
-                st.error("❌ 请输入6位代码")
+               if st.button("🔍 查询", type="primary"):
+            # 输入校验
+            if not query_code.isdigit() or len(query_code) != 6:
+                st.error("❌ 请输入正确的6位股票代码（如 000001、600519）")
+                st.stop()
+            
+            query_code = query_code.zfill(6)  # 自动补零
+            
+            start_str = start_date.strftime('%Y%m%d')
+            end_str = end_date.strftime('%Y%m%d')
+            
+            if start_str > end_str:
+                st.error("❌ 开始日期不能晚于结束日期")
+                st.stop()
+            
+            with st.spinner(f"正在加载 {query_code} 从 {start_str} 到 {end_str} 的历史数据..."):
+                hist_df = get_stock_history(
+                    query_code,
+                    start_date=start_str,
+                    end_date=end_str
+                )
+            
+            if hist_df.empty:
+                st.error(f"❌ 未找到股票 {query_code} 的历史数据")
+                st.info("可能原因：")
+                st.info("- 股票代码错误")
+                st.info("- 日期范围太长或无交易日")
+                st.info("- 数据源暂时不可用")
+                st.stop()
+            
+            # 获取股票名称
+            stock_info = all_stocks[all_stocks['code'] == query_code]
+            stock_name = stock_info['name'].iloc[0] if not stock_info.empty else query_code
+            
+            st.success(f"✅ 成功加载 {stock_name} ({query_code}) 的 {len(hist_df)} 条数据")
+            
+            # 统计指标
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("股票名称", stock_name)
+            with col2:
+                period_return = ((hist_df['close'].iloc[-1] / hist_df['close'].iloc[0]) - 1) * 100
+                st.metric("区间涨幅", f"{period_return:.2f}%")
+            with col3:
+                st.metric("最高价", f"¥{hist_df['high'].max():.2f}")
+            with col4:
+                st.metric("最低价", f"¥{hist_df['low'].min():.2f}")
+            
+            # K线图（关键：加了唯一key）
+            st.markdown("### 📈 K线图")
+            fig = plot_kline(query_code, stock_name, start_str, end_str)
+            st.plotly_chart(fig, use_container_width=True, key=f"free_query_kline_{query_code}")
+            
+            # 数据表格
+            st.markdown("### 📊 历史数据（最近50条）")
+            display_df = hist_df.copy()
+            display_df['date'] = display_df['date'].dt.strftime('%Y-%m-%d')
+            display_df = display_df[['date', 'open', 'close', 'high', 'low', 'volume', 'pct_chg']]
+            display_df.columns = ['日期', '开盘', '收盘', '最高', '最低', '成交量(手)', '涨跌幅%']
+            
+            st.dataframe(display_df.tail(50), use_container_width=True)
+            
+            # 下载
+            csv = hist_df.to_csv(index=False, encoding='utf-8-sig')
+            st.download_button(
+                "⬇️ 下载完整CSV数据",
+                csv,
+                f"{query_code}_{stock_name}_{start_str}_{end_str}.csv",
+                "text/csv"
+            ) 
+
+               
 
 if __name__ == "__main__":
     main()
+
 
 
 

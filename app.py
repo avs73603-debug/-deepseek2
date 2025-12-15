@@ -1167,8 +1167,8 @@ def main():
                     g_results = scan_g_signals_parallel(all_stocks, limit=100)
                 st.session_state.g_results = g_results  # 保存到全局
                 st.info(f"发现 {len(g_results)} 只命中G信号")
-            else:
-                g_results = st.session_state.get('g_results', {})
+        else:
+            g_results = st.session_state.get('g_results', {})
         
         # 筛选打分
         filtered_df = filter_and_score(all_stocks, filters, north_symbols, hot_df, g_results)
@@ -1315,4 +1315,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 

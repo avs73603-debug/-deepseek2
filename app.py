@@ -1269,12 +1269,11 @@ def main():
     # ========== Tab3: 自由查询 ==========
     with tab3:
         st.subheader("📅 自由日期查询")
-            # 从智能选股页面获取数据（修复跨页面问题）
-            filtered_df = st.session_state.get('filtered_df', pd.DataFrame())
-            g_results = st.session_state.get('g_results', {})
-
-            if filtered_df.empty:
-                st.warning("⚠️ 请先在“智能选股”页面进行一次筛选后再查看这里")
+        # 从智能选股页面获取数据（修复跨页面问题）
+        filtered_df = st.session_state.get('filtered_df', pd.DataFrame())
+        g_results = st.session_state.get('g_results', {})
+        if filtered_df.empty:
+            st.warning("⚠️ 请先在“智能选股”页面进行一次筛选后再查看这里")
         col1, col2, col3 = st.columns(3)
         
         with col1:
@@ -1317,6 +1316,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 

@@ -616,35 +616,31 @@ def scan_g_signals_parallel(df_stocks, limit=100):
 # 方案3：向量化打分
 # ============================================================
 def calculate_score_vectorized(df, north_symbols, hot_df=None):
-    """向量化批量打分"""
+    """向量化批量打分（优化版：热点关注度也向量化）"""
     scores = np.zeros(len(df), dtype=float)
-    
+
     # 涨势得分
     pct_5d = df['pct_5d'].values
     mask_rise = (pct_5d >= 3) & (pct_5d <= 15)
     scores[mask_rise] += 30 * (pct_5d[mask_rise] / 15)
-    
+
     # 量能得分
-    volume_ratio = df['volume_ratio'].values
-    scores[volume_ratio > 1.5] += 15
-    
+    scores[df['volume_ratio'].values > 1.5] += 15
+
     # 估值得分
     pe = df['pe_ttm'].values
-    mask_pe = (pe >= 10) & (pe <= 30)
-    scores[mask_pe] += 10
-    
-    # 北向资金得分
-    north_mask = df['code'].isin(north_symbols)
-    scores[north_mask] += 5
-    
-    # 市场关注度得分（向量化）
-    if hot_df is not None and not hot_df.empty:
-        for idx, code in enumerate(df['code']):
-            attention = calculate_market_attention(code, hot_df)
-            scores[idx] += attention * 0.05
-    
-    return scores
+    scores[(pe >= 10) & (pe <= 30)] += 10
 
+    # 北向资金
+    scores[df['code'].isin(north_symbols)] += 5
+
+    # 市场关注度（热点排行）——向量化优化
+    if hot_df is not None and not hot_df.empty and '代码' in hot_df.columns:
+        hot_rank_map = {code: max(0, 100 - (i + 1)) for i, code in enumerate(hot_df['代码'])}
+        attention_scores = df['code'].map(hot_rank_map).fillna(0).values
+        scores += attention_scores * 0.05
+
+    return scores
 def calculate_score_with_tech(row, north_symbols, tech_signals, hot_df):
     """带技术指标的打分"""
     score = 0.0
@@ -706,7 +702,10 @@ def filter_and_score(df, filters, north_symbols, hot_df, g_results=None):
             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
     
     df['float_mv_yi'] = df['float_mv'] / 100000000.0
-    df['pct_5d'] = df['pct_chg'] * np.random.uniform(1.2, 2.5, len(df))
+    # 临时方案：避免分数随机跳动（后续可升级为真实5日涨幅）
+    df['pct_5d'] = df['pct_chg']  # 用当日涨幅代替，稳定不乱跳
+    # 如果想完全关闭这部分打分，用下面这行：
+    # df['pct_5d'] = 0
     
     # 剔除ST
     if filters.get('exclude_st', True):
@@ -1163,13 +1162,17 @@ def main():
         
         # 扫描G信号
         g_results = {}
-        if st.checkbox("启用G信号扫描", False):
-            g_results = scan_g_signals_parallel(all_stocks, limit=100)
-            st.info(f"发现 {len(g_results)} 只")
+        if st.checkbox("启用G信号扫描（较慢，建议前100候选）", False):
+                with st.spinner("正在并行扫描G信号..."):
+                    g_results = scan_g_signals_parallel(all_stocks, limit=100)
+                st.session_state.g_results = g_results  # 保存到全局
+                st.info(f"发现 {len(g_results)} 只命中G信号")
+            else:
+                g_results = st.session_state.get('g_results', {})
         
         # 筛选打分
         filtered_df = filter_and_score(all_stocks, filters, north_symbols, hot_df, g_results)
-        
+        st.session_state.filtered_df = filtered_df
         if filtered_df.empty:
             st.warning("⚠️ 无符合条件股票")
             return
@@ -1250,19 +1253,26 @@ def main():
                 
                 for symbol, signals in list(g_results.items())[:20]:
                     stock = filtered_df[filtered_df['code'] == symbol]
-                    if not stock.empty:
-                        row = stock.iloc[0]
-                        badges = " ".join([f"【{s}】" for s in signals])
-                        st.markdown(f"**{row['name']}({symbol})** {badges}")
-                        st.text(f"¥{row['price']:.2f} | {row['pct_chg']:.2f}%")
-                        st.markdown("---")
+                        if not stock.empty:
+                            row = stock.iloc[0]
+                            badges = " ".join([f"【{s}】" for s in signals])
+                            st.markdown(f"**{row['name']}({symbol})** {badges}")
+                            st.text(f"¥{row['price']:.2f} | {row['pct_chg']:.2f}%")
+                            st.markdown("---")
+                        else:
+                            st.markdown(f"**{symbol}** {' '.join([f'【{s}】' for s in signals])} （未在当前筛选结果中）")
             else:
                 st.warning("暂无命中")
     
     # ========== Tab3: 自由查询 ==========
     with tab3:
         st.subheader("📅 自由日期查询")
-        
+            # 从智能选股页面获取数据（修复跨页面问题）
+            filtered_df = st.session_state.get('filtered_df', pd.DataFrame())
+            g_results = st.session_state.get('g_results', {})
+
+            if filtered_df.empty:
+                st.warning("⚠️ 请先在“智能选股”页面进行一次筛选后再查看这里")
         col1, col2, col3 = st.columns(3)
         
         with col1:
@@ -1305,3 +1315,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

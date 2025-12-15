@@ -1375,24 +1375,48 @@ def main():
             stock_info = all_stocks[all_stocks['code'] == query_code]
             stock_name = stock_info['name'].iloc[0] if not stock_info.empty else query_code
             
-            st.success(f"✅ 成功加载 {stock_name} ({query_code}) 的 {len(hist_df)} 条数据")
-            
-            # 统计指标
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("股票名称", stock_name)
-            with col2:
-                period_return = ((hist_df['close'].iloc[-1] / hist_df['close'].iloc[0]) - 1) * 100
-                st.metric("区间涨幅", f"{period_return:.2f}%")
-            with col3:
-                st.metric("最高价", f"¥{hist_df['high'].max():.2f}")
-            with col4:
-                st.metric("最低价", f"¥{hist_df['low'].min():.2f}")
-            
-            # K线图（关键：加了唯一key）
-            st.markdown("### 📈 K线图")
-            fig = plot_kline(query_code, stock_name, start_str, end_str)
-            st.plotly_chart(fig, use_container_width=True, key=f"free_query_kline_{query_code}")
+                st.success(f"✅ 成功加载 {stock_name} ({query_code}) 的 {len(hist_df)} 条数据")
+                
+                # 临时调试：看akshare返回了什么列名（可选，测试后可删）
+                # st.write("调试：数据列名", hist_df.columns.tolist())
+                
+                # 防御计算统计指标
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("股票名称", stock_name)
+                
+                with col2:
+                    if 'close' in hist_df.columns and len(hist_df) >= 2:
+                        try:
+                            period_return = ((hist_df['close'].iloc[-1] / hist_df['close'].iloc[0]) - 1) * 100
+                            st.metric("区间涨幅", f"{period_return:.2f}%")
+                        except:
+                            st.metric("区间涨幅", "计算失败")
+                    else:
+                        st.metric("区间涨幅", "N/A")
+                
+                with col3:
+                    if 'high' in hist_df.columns:
+                        try:
+                            st.metric("最高价", f"¥{hist_df['high'].max():.2f}")
+                        except:
+                            st.metric("最高价", "N/A")
+                    else:
+                        st.metric("最高价", "N/A")
+                
+                with col4:
+                    if 'low' in hist_df.columns:
+                        try:
+                            st.metric("最低价", f"¥{hist_df['low'].min():.2f}")
+                        except:
+                            st.metric("最低价", "N/A")
+                    else:
+                        st.metric("最低价", "N/A")
+                
+                # K线图（你之前已经改过防御版了，应该没事）
+                st.markdown("### 📈 K线图 + MA + MACD")
+                fig = plot_kline(query_code, stock_name, start_str, end_str)
+                st.plotly_chart(fig, use_container_width=True, key=f"free_query_kline_{query_code}")
             
             # 数据表格
             st.markdown("### 📊 历史数据（最近50条）")
@@ -1416,6 +1440,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 

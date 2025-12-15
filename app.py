@@ -1244,174 +1244,192 @@ def render_stocks_with_pagination(df, page_size=10):
 # K线图
 # ============================================================
 def plot_kline(symbol, name, start_date=None, end_date=None):
-    """绘制K线图 - 优化图例和布局版"""
+    """绘制K线图 - 稳定版"""
     try:
         # 获取数据
-        df = get_stock_history(symbol, start_date=start_date, end_date=end_date)
+        if start_date and end_date:
+            df = get_stock_history(symbol, start_date=start_date, end_date=end_date)
+        else:
+            df = get_stock_history(symbol, days=60)  # 默认60天
         
         if df.empty:
-            df = get_stock_history(symbol, days=60)
+            # 尝试获取更短期的数据
+            df = get_stock_history(symbol, days=30)
         
-        if df.empty or 'close' not in df.columns:
-            return create_error_chart(f"暂无{name}({symbol})数据")
+        if df.empty:
+            # 创建无数据提示
+            fig = go.Figure()
+            fig.add_annotation(
+                text=f"📊 {name}({symbol})<br><br>暂无历史数据<br>请检查股票代码或稍后重试",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5,
+                showarrow=False,
+                font=dict(size=14, color="#666666"),
+                align="center"
+            )
+            fig.update_layout(
+                height=400,
+                plot_bgcolor='#ffffff',
+                paper_bgcolor='#ffffff',
+                margin=dict(l=20, r=20, t=20, b=20)
+            )
+            return fig
         
-        # 确保数据格式正确
-        required_cols = ['open', 'high', 'low', 'close', 'volume']
-        for col in required_cols:
+        # 确保有必要的列
+        required = ['date', 'open', 'high', 'low', 'close', 'volume']
+        for col in required:
             if col not in df.columns:
-                df[col] = df.get('close', 10)
-            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(method='ffill').fillna(10)
+                # 尝试重命名中文列
+                chinese_map = {'日期': 'date', '开盘': 'open', '收盘': 'close', 
+                              '最高': 'high', '最低': 'low', '成交量': 'volume'}
+                for ch_col, en_col in chinese_map.items():
+                    if ch_col in df.columns and col == en_col:
+                        df[en_col] = df[ch_col]
+                        break
         
-        # 计算技术指标
-        if len(df) >= 5:
-            try:
-                df = calculate_ma(df)
-            except:
-                pass
+        # 确保数据类型正确
+        for col in ['open', 'high', 'low', 'close', 'volume']:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        
+        # 确保日期列正确
+        if 'date' in df.columns:
+            df['date'] = pd.to_datetime(df['date'], errors='coerce')
+            df = df.dropna(subset=['date'])
+            df = df.sort_values('date')
+        else:
+            # 如果没有日期列，创建索引
+            df['date'] = pd.date_range(end=datetime.now(TZ), periods=len(df), freq='D')
+        
+        # 如果数据太多，减少显示密度
+        if len(df) > 100:
+            step = max(1, len(df) // 50)  # 最多显示50个点
+            df = df.iloc[::step].copy()
         
         # ========== 创建图表 ==========
         fig = make_subplots(
             rows=2, cols=1,
             row_heights=[0.7, 0.3],
-            vertical_spacing=0.1,  # 子图间距
-            shared_xaxes=True,     # 共享X轴
-            subplot_titles=(None, None)  # 不显示自动标题
+            vertical_spacing=0.1,
+            shared_xaxes=True,
+            subplot_titles=(None, None)  # 不自动生成标题
         )
         
-        # ========== 主图：K线和均线 ==========
-        # K线
+        # 1. K线图
         fig.add_trace(go.Candlestick(
             x=df['date'],
             open=df['open'],
             high=df['high'],
             low=df['low'],
             close=df['close'],
-            increasing_line_color='red',
-            decreasing_line_color='green',
-            name="K线",
-            showlegend=True
+            name="价格",
+            increasing_line_color='#ef5350',  # 红色
+            decreasing_line_color='#26a69a'   # 绿色
         ), row=1, col=1)
         
-        # 均线（如果存在）
-        ma_colors = {
-            'ma5': 'orange',
-            'ma10': 'blue', 
-            'ma20': 'purple',
-            'ma60': 'gray'
-        }
-        
-        for ma_name, color in ma_colors.items():
-            if ma_name in df.columns and not df[ma_name].isna().all():
-                fig.add_trace(go.Scatter(
-                    x=df['date'],
-                    y=df[ma_name],
-                    mode='lines',
-                    name=ma_name.upper(),
-                    line=dict(color=color, width=1),
-                    showlegend=True
-                ), row=1, col=1)
-        
-        # ========== 副图：成交量 ==========
-        # 计算颜色（红跌绿涨）
-        colors = []
-        for i in range(len(df)):
-            if i == 0:
-                colors.append('green')  # 第一天默认绿色
-            else:
-                colors.append('green' if df['close'].iloc[i] >= df['close'].iloc[i-1] else 'red')
+        # 2. 成交量（红绿柱）
+        colors = ['#ef5350' if df['close'].iloc[i] < df['open'].iloc[i] 
+                 else '#26a69a' for i in range(len(df))]
         
         fig.add_trace(go.Bar(
             x=df['date'],
             y=df['volume'],
             name="成交量",
             marker_color=colors,
-            opacity=0.7,
-            showlegend=True
+            opacity=0.6
         ), row=2, col=1)
         
-        # ========== 关键：优化布局 ==========
+        # ========== 布局设置 ==========
         fig.update_layout(
             # 主标题
             title=dict(
                 text=f"<b>{name} ({symbol})</b>",
-                font=dict(size=18, color='black'),
-                x=0.5,  # 居中
+                font=dict(size=16, color='#333333'),
+                x=0.5,
                 xanchor='center',
-                y=0.95,  # 上移，给图例留空间
-                yanchor='top'
+                y=0.95
             ),
             
-            # 图例设置
+            # 图例
             legend=dict(
-                orientation="h",      # 水平图例
-                yanchor="bottom",     # 锚点在底部
-                y=1.02,              # 在标题上方（原来是0.99，太靠下）
-                xanchor="center",     # 水平居中
-                x=0.5,               # 居中
-                bgcolor='rgba(255,255,255,0.8)',  # 半透明背景
-                bordercolor='lightgray',
-                borderwidth=1,
-                font=dict(size=11)
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="center",
+                x=0.5,
+                bgcolor='rgba(255,255,255,0.9)',
+                font=dict(size=11, color='#333333')
             ),
             
-            # 图表尺寸和边距
-            height=550,
+            # 图表样式
+            height=500,
             template='plotly_white',
-            margin=dict(l=60, r=40, t=100, b=60),  # 上边距增大，避免重叠
-            
-            # 其他设置
-            hovermode='x unified',
-            xaxis_rangeslider_visible=False
+            plot_bgcolor='white',
+            paper_bgcolor='white',
+            margin=dict(l=50, r=30, t=80, b=70),
+            xaxis_rangeslider_visible=False,
+            hovermode='x unified'
         )
         
-        # ========== 优化X轴 ==========
-        # 主图X轴（隐藏标签）
+        # X轴设置
         fig.update_xaxes(
             row=1, col=1,
-            showticklabels=False,  # 不显示刻度标签
-            showgrid=True,
-            gridcolor='rgba(128,128,128,0.1)'
+            showticklabels=False,  # 主图不显示X轴标签
+            gridcolor='rgba(200,200,200,0.2)'
         )
         
-        # 副图X轴（显示日期）
         fig.update_xaxes(
             row=2, col=1,
             title_text="日期",
-            tickformat='%Y-%m-%d',
+            tickformat='%m-%d',  # 只显示月-日
             tickangle=45,
-            tickfont=dict(size=10, color='black'),  # 字体黑色没问题
-            title_font=dict(size=12, color='black'),
-            showgrid=True,
-            gridcolor='rgba(128,128,128,0.1)'
+            tickfont=dict(size=10, color='#666666'),
+            title_font=dict(size=12, color='#333333'),
+            gridcolor='rgba(200,200,200,0.2)'
         )
         
-        # ========== 优化Y轴 ==========
-        # 主图Y轴
+        # Y轴设置
         fig.update_yaxes(
             row=1, col=1,
             title_text="价格 (元)",
             tickprefix="¥",
             tickformat=".2f",
-            title_font=dict(size=12, color='black'),
-            tickfont=dict(size=10, color='black'),
-            showgrid=True,
-            gridcolor='rgba(128,128,128,0.1)'
+            title_font=dict(size=12, color='#333333'),
+            tickfont=dict(size=10, color='#666666'),
+            gridcolor='rgba(200,200,200,0.2)'
         )
         
-        # 副图Y轴（成交量）
         fig.update_yaxes(
             row=2, col=1,
             title_text="成交量",
-            title_font=dict(size=12, color='black'),  # 标题黑色
-            tickfont=dict(size=10, color='black'),     # 刻度黑色
-            showgrid=True,
-            gridcolor='rgba(128,128,128,0.1)'
+            title_font=dict(size=12, color='#333333'),
+            tickfont=dict(size=10, color='#666666'),
+            gridcolor='rgba(200,200,200,0.2)'
         )
         
         return fig
         
     except Exception as e:
-        return create_error_chart(f"图表错误: {str(e)[:50]}")
+        # 错误处理
+        import traceback
+        error_msg = str(e)[:100]
+        
+        fig = go.Figure()
+        fig.add_annotation(
+            text=f"⚠️ 图表生成失败<br>错误: {error_msg}",
+            xref="paper", yref="paper",
+            x=0.5, y=0.5,
+            showarrow=False,
+            font=dict(size=12, color="#ff6b6b")
+        )
+        fig.update_layout(
+            height=300,
+            plot_bgcolor='white',
+            paper_bgcolor='white',
+            showlegend=False,
+            margin=dict(l=20, r=20, t=20, b=20)
+        )
+        return fig
 # 这里应该有空行，然后开始下一个函数定义
 # ============================================================
 # AI助手
@@ -1972,6 +1990,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 

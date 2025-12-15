@@ -36,44 +36,205 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# 设置浅色主题
+st.markdown("""
+    <meta name="theme-color" content="#ffffff">
+    <meta name="msapplication-navbutton-color" content="#ffffff">
+    <meta name="apple-mobile-web-app-status-bar-style" content="#ffffff">
+""", unsafe_allow_html=True)
+
 st.markdown("""
 <style>
-    .stApp {font-family: 'Arial', 'Microsoft YaHei', sans-serif;}
+    /* ========== 全局文字颜色修复 ========== */
+    .stApp {
+        color: #333333 !important;  /* 深灰色文字，在深色背景上清晰 */
+        font-family: 'Arial', 'Microsoft YaHei', sans-serif;
+    }
+    
+    /* 所有文本元素 */
+    h1, h2, h3, h4, h5, h6, p, span, div {
+        color: #333333 !important;
+    }
+    
+    /* Streamlit组件文字 */
+    .stMarkdown, .stText, .stTitle, .stHeader {
+        color: #333333 !important;
+    }
+    
+    /* 侧边栏文字 */
+    section[data-testid="stSidebar"] * {
+        color: #333333 !important;
+    }
+    
+    /* 卡片文字 */
+    .stock-card * {
+        color: #333333 !important;
+    }
+    
+    /* 指标文字 */
+    .stMetric {
+        color: #333333 !important;
+    }
+    
+    /* 标签页文字 */
+    .stTabs [data-baseweb="tab-list"] button {
+        color: #333333 !important;
+    }
+    
+    /* 按钮文字 */
+    .stButton button {
+        color: #333333 !important;
+    }
+    
+    /* 输入框文字 */
+    .stTextInput input, .stSelectbox select {
+        color: #333333 !important;
+    }
+    
+    /* 数据框文字 */
+    .dataframe * {
+        color: #333333 !important;
+    }
+    
+    /* ========== Plotly图表文字修复 ========== */
+    .plotly-graph-div text {
+        fill: #333333 !important;
+        color: #333333 !important;
+    }
+    
+    /* 图表标题和坐标轴 */
+    .gtitle, .xtitle, .ytitle, .legendtext {
+        fill: #333333 !important;
+        color: #333333 !important;
+    }
+    
+    /* 图表刻度 */
+    .xtick text, .ytick text {
+        fill: #333333 !important;
+        color: #333333 !important;
+    }
+    
+    /* ========== 背景颜色调整 ========== */
+    /* 主背景改为浅色 */
+    .stApp {
+        background-color: #f8f9fa !important;
+    }
+    
+    /* 侧边栏背景 */
+    section[data-testid="stSidebar"] {
+        background-color: #ffffff !important;
+        border-right: 1px solid #e0e0e0;
+    }
+    
+    /* 卡片背景 */
     .stock-card {
-        border: 2px solid #e0e0e0;
-        border-radius: 12px;
-        padding: 15px;
-        margin: 10px 0;
-        background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        background: linear-gradient(135deg, #ffffff 0%, #f5f7fa 100%) !important;
+        border: 1px solid #e0e0e0 !important;
+        color: #333333 !important;
     }
+    
+    /* 标签页内容区 */
+    .stTabs [data-baseweb="tab-panel"] {
+        background-color: #ffffff !important;
+        padding: 20px;
+        border-radius: 10px;
+        border: 1px solid #e0e0e0;
+    }
+    
+    /* ========== 组件样式优化 ========== */
+    /* 输入框 */
+    .stTextInput>div>div {
+        background-color: #ffffff !important;
+        border: 1px solid #ddd !important;
+    }
+    
+    /* 下拉框 */
+    .stSelectbox>div>div {
+        background-color: #ffffff !important;
+        border: 1px solid #ddd !important;
+    }
+    
+    /* 按钮 */
+    .stButton button {
+        background-color: #4ecdc4 !important;
+        color: white !important;
+        border: none !important;
+        border-radius: 5px !important;
+        padding: 8px 16px !important;
+        font-weight: bold !important;
+    }
+    
+    .stButton button:hover {
+        background-color: #3dbab0 !important;
+    }
+    
+    /* 数据框 */
+    .dataframe {
+        background-color: #ffffff !important;
+        border: 1px solid #e0e0e0 !important;
+    }
+    
+    /* ========== 信号标签样式 ========== */
     .g-signal-badge, .signal-badge {
-        display: inline-block;
-        padding: 3px 8px;
-        margin: 2px;
-        border-radius: 4px;
-        font-size: 11px;
+        color: white !important;
         font-weight: bold;
-        color: white;
     }
-    .g1-badge {background: #ff6b6b;}
-    .g2-badge {background: #4ecdc4;}
-    .signal-badge {background: linear-gradient(135deg, #f093fb, #f5576c);}
+    
+    .g1-badge {background: #ff6b6b !important;}
+    .g2-badge {background: #4ecdc4 !important;}
+    .signal-badge {background: linear-gradient(135deg, #f093fb, #f5576c) !important;}
+    
+    /* ========== 性能指示器 ========== */
     .perf-indicator {
-        position: fixed;
-        top: 10px;
-        right: 10px;
-        background: rgba(0,0,0,0.8);
-        color: white;
-        padding: 8px 12px;
-        border-radius: 6px;
-        font-size: 12px;
-        z-index: 9999;
+        background: rgba(0,0,0,0.8) !important;
+        color: white !important;
     }
 </style>
 """, unsafe_allow_html=True)
 
 TZ = pytz.timezone('Asia/Shanghai')
+
+def apply_light_theme():
+    """应用浅色主题"""
+    light_theme = """
+    <style>
+    :root {
+        --primary-color: #4ecdc4;
+        --text-color: #333333;
+        --bg-color: #f8f9fa;
+        --card-bg: #ffffff;
+        --border-color: #e0e0e0;
+    }
+    
+    /* 覆盖Streamlit默认样式 */
+    .stApp {
+        background-color: var(--bg-color) !important;
+        color: var(--text-color) !important;
+    }
+    
+    /* 所有文字元素 */
+    * {
+        color: var(--text-color) !important;
+    }
+    
+    /* 特别处理黑色文字 */
+    [style*="color: black"], 
+    [style*="color: #000"],
+    [style*="color: #000000"] {
+        color: var(--text-color) !important;
+    }
+    
+    /* Plotly图表 */
+    .js-plotly-plot .plotly {
+        background-color: white !important;
+    }
+    
+    .js-plotly-plot .plotly text {
+        fill: var(--text-color) !important;
+    }
+    </style>
+    """
+    st.markdown(light_theme, unsafe_allow_html=True)
 
 # ============================================================
 # 性能监控装饰器
@@ -1083,174 +1244,192 @@ def render_stocks_with_pagination(df, page_size=10):
 # K线图
 # ============================================================
 def plot_kline(symbol, name, start_date=None, end_date=None):
-    """绘制K线图 - 优化图例和布局版"""
+    """绘制K线图 - 优化文字颜色版"""
     try:
-        # 获取数据
-        df = get_stock_history(symbol, start_date=start_date, end_date=end_date)
+        # ... [前面的代码不变] ...
         
-        if df.empty:
-            df = get_stock_history(symbol, days=60)
-        
-        if df.empty or 'close' not in df.columns:
-            return create_error_chart(f"暂无{name}({symbol})数据")
-        
-        # 确保数据格式正确
-        required_cols = ['open', 'high', 'low', 'close', 'volume']
-        for col in required_cols:
-            if col not in df.columns:
-                df[col] = df.get('close', 10)
-            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(method='ffill').fillna(10)
-        
-        # 计算技术指标
-        if len(df) >= 5:
-            try:
-                df = calculate_ma(df)
-            except:
-                pass
-        
-        # ========== 创建图表 ==========
-        fig = make_subplots(
-            rows=2, cols=1,
-            row_heights=[0.7, 0.3],
-            vertical_spacing=0.1,  # 子图间距
-            shared_xaxes=True,     # 共享X轴
-            subplot_titles=(None, None)  # 不显示自动标题
-        )
-        
-        # ========== 主图：K线和均线 ==========
-        # K线
-        fig.add_trace(go.Candlestick(
-            x=df['date'],
-            open=df['open'],
-            high=df['high'],
-            low=df['low'],
-            close=df['close'],
-            increasing_line_color='red',
-            decreasing_line_color='green',
-            name="K线",
-            showlegend=True
-        ), row=1, col=1)
-        
-        # 均线（如果存在）
-        ma_colors = {
-            'ma5': 'orange',
-            'ma10': 'blue', 
-            'ma20': 'purple',
-            'ma60': 'gray'
-        }
-        
-        for ma_name, color in ma_colors.items():
-            if ma_name in df.columns and not df[ma_name].isna().all():
-                fig.add_trace(go.Scatter(
-                    x=df['date'],
-                    y=df[ma_name],
-                    mode='lines',
-                    name=ma_name.upper(),
-                    line=dict(color=color, width=1),
-                    showlegend=True
-                ), row=1, col=1)
-        
-        # ========== 副图：成交量 ==========
-        # 计算颜色（红跌绿涨）
-        colors = []
-        for i in range(len(df)):
-            if i == 0:
-                colors.append('green')  # 第一天默认绿色
-            else:
-                colors.append('green' if df['close'].iloc[i] >= df['close'].iloc[i-1] else 'red')
-        
-        fig.add_trace(go.Bar(
-            x=df['date'],
-            y=df['volume'],
-            name="成交量",
-            marker_color=colors,
-            opacity=0.7,
-            showlegend=True
-        ), row=2, col=1)
-        
-        # ========== 关键：优化布局 ==========
+        # ========== 优化布局（重点修改文字颜色） ==========
         fig.update_layout(
-            # 主标题
+            # 主标题 - 使用深色
             title=dict(
                 text=f"<b>{name} ({symbol})</b>",
-                font=dict(size=18, color='black'),
-                x=0.5,  # 居中
+                font=dict(size=18, color='#333333'),  # 深灰色
+                x=0.5,
                 xanchor='center',
-                y=0.95,  # 上移，给图例留空间
-                yanchor='top'
+                y=0.95
             ),
             
-            # 图例设置
+            # 图例设置 - 文字深色
             legend=dict(
-                orientation="h",      # 水平图例
-                yanchor="bottom",     # 锚点在底部
-                y=1.02,              # 在标题上方（原来是0.99，太靠下）
-                xanchor="center",     # 水平居中
-                x=0.5,               # 居中
-                bgcolor='rgba(255,255,255,0.8)',  # 半透明背景
-                bordercolor='lightgray',
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="center",
+                x=0.5,
+                bgcolor='rgba(255,255,255,0.9)',
+                bordercolor='#e0e0e0',
                 borderwidth=1,
-                font=dict(size=11)
+                font=dict(size=11, color='#333333')  # 图例文字深色
             ),
             
-            # 图表尺寸和边距
+            # 图表设置
             height=550,
-            template='plotly_white',
-            margin=dict(l=60, r=40, t=100, b=60),  # 上边距增大，避免重叠
-            
-            # 其他设置
-            hovermode='x unified',
-            xaxis_rangeslider_visible=False
+            template='plotly_white',  # 使用白色模板
+            plot_bgcolor='white',     # 背景白色
+            paper_bgcolor='white',    # 纸张背景白色
+            margin=dict(l=60, r=40, t=100, b=60),
+            hovermode='x unified'
         )
         
-        # ========== 优化X轴 ==========
-        # 主图X轴（隐藏标签）
-        fig.update_xaxes(
-            row=1, col=1,
-            showticklabels=False,  # 不显示刻度标签
-            showgrid=True,
-            gridcolor='rgba(128,128,128,0.1)'
-        )
-        
-        # 副图X轴（显示日期）
+        # ========== 优化坐标轴文字颜色 ==========
+        # 副图X轴
         fig.update_xaxes(
             row=2, col=1,
             title_text="日期",
             tickformat='%Y-%m-%d',
             tickangle=45,
-            tickfont=dict(size=10, color='black'),  # 字体黑色没问题
-            title_font=dict(size=12, color='black'),
+            tickfont=dict(size=10, color='#666666'),  # 中灰色
+            title_font=dict(size=12, color='#333333'),  # 标题深灰色
             showgrid=True,
-            gridcolor='rgba(128,128,128,0.1)'
+            gridcolor='rgba(128,128,128,0.1)',
+            linecolor='#e0e0e0'
         )
         
-        # ========== 优化Y轴 ==========
         # 主图Y轴
         fig.update_yaxes(
             row=1, col=1,
             title_text="价格 (元)",
             tickprefix="¥",
             tickformat=".2f",
-            title_font=dict(size=12, color='black'),
-            tickfont=dict(size=10, color='black'),
+            title_font=dict(size=12, color='#333333'),
+            tickfont=dict(size=10, color='#666666'),
             showgrid=True,
-            gridcolor='rgba(128,128,128,0.1)'
+            gridcolor='rgba(128,128,128,0.1)',
+            linecolor='#e0e0e0'
         )
         
         # 副图Y轴（成交量）
         fig.update_yaxes(
             row=2, col=1,
             title_text="成交量",
-            title_font=dict(size=12, color='black'),  # 标题黑色
-            tickfont=dict(size=10, color='black'),     # 刻度黑色
+            title_font=dict(size=12, color='#333333'),
+            tickfont=dict(size=10, color='#666666'),
             showgrid=True,
-            gridcolor='rgba(128,128,128,0.1)'
+            gridcolor='rgba(128,128,128,0.1)',
+            linecolor='#e0e0e0'
         )
         
         return fig
         
     except Exception as e:
-        return create_error_chart(f"图表错误: {str(e)[:50]}")
+        # 错误图表也要用浅色
+        fig = go.Figure()
+        fig.add_annotation(
+            text=f"图表错误: {str(e)[:50]}",
+            xref="paper", yref="paper",
+            x=0.5, y=0.5,
+            showarrow=False,
+            font=dict(size=14, color='#333333')  # 错误信息也用深色
+        )
+        fig.update_layout(
+            height=300,
+            plot_bgcolor='white',
+            paper_bgcolor='white'
+        )
+        return figdef plot_kline(symbol, name, start_date=None, end_date=None):
+    """绘制K线图 - 优化文字颜色版"""
+    try:
+        # ... [前面的代码不变] ...
+        
+        # ========== 优化布局（重点修改文字颜色） ==========
+        fig.update_layout(
+            # 主标题 - 使用深色
+            title=dict(
+                text=f"<b>{name} ({symbol})</b>",
+                font=dict(size=18, color='#333333'),  # 深灰色
+                x=0.5,
+                xanchor='center',
+                y=0.95
+            ),
+            
+            # 图例设置 - 文字深色
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="center",
+                x=0.5,
+                bgcolor='rgba(255,255,255,0.9)',
+                bordercolor='#e0e0e0',
+                borderwidth=1,
+                font=dict(size=11, color='#333333')  # 图例文字深色
+            ),
+            
+            # 图表设置
+            height=550,
+            template='plotly_white',  # 使用白色模板
+            plot_bgcolor='white',     # 背景白色
+            paper_bgcolor='white',    # 纸张背景白色
+            margin=dict(l=60, r=40, t=100, b=60),
+            hovermode='x unified'
+        )
+        
+        # ========== 优化坐标轴文字颜色 ==========
+        # 副图X轴
+        fig.update_xaxes(
+            row=2, col=1,
+            title_text="日期",
+            tickformat='%Y-%m-%d',
+            tickangle=45,
+            tickfont=dict(size=10, color='#666666'),  # 中灰色
+            title_font=dict(size=12, color='#333333'),  # 标题深灰色
+            showgrid=True,
+            gridcolor='rgba(128,128,128,0.1)',
+            linecolor='#e0e0e0'
+        )
+        
+        # 主图Y轴
+        fig.update_yaxes(
+            row=1, col=1,
+            title_text="价格 (元)",
+            tickprefix="¥",
+            tickformat=".2f",
+            title_font=dict(size=12, color='#333333'),
+            tickfont=dict(size=10, color='#666666'),
+            showgrid=True,
+            gridcolor='rgba(128,128,128,0.1)',
+            linecolor='#e0e0e0'
+        )
+        
+        # 副图Y轴（成交量）
+        fig.update_yaxes(
+            row=2, col=1,
+            title_text="成交量",
+            title_font=dict(size=12, color='#333333'),
+            tickfont=dict(size=10, color='#666666'),
+            showgrid=True,
+            gridcolor='rgba(128,128,128,0.1)',
+            linecolor='#e0e0e0'
+        )
+        
+        return fig
+        
+    except Exception as e:
+        # 错误图表也要用浅色
+        fig = go.Figure()
+        fig.add_annotation(
+            text=f"图表错误: {str(e)[:50]}",
+            xref="paper", yref="paper",
+            x=0.5, y=0.5,
+            showarrow=False,
+            font=dict(size=14, color='#333333')  # 错误信息也用深色
+        )
+        fig.update_layout(
+            height=300,
+            plot_bgcolor='white',
+            paper_bgcolor='white'
+        )
+        return fig
 # ============================================================
 # AI助手
 # ============================================================
@@ -1466,6 +1645,7 @@ def render_sidebar():
 # 主程序
 # ============================================================
 def main():
+    apply_light_theme()
     init_g_signals()
     
     # 性能指示器
@@ -1809,4 +1989,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 

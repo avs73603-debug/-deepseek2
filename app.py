@@ -1284,7 +1284,7 @@ def main():
         
         with col3:
             end_date = st.date_input("结束", datetime.now(TZ))
-               if st.button("🔍 查询", type="primary"):
+        if st.button("🔍 查询", type="primary"):
             # 输入校验
             if not query_code.isdigit() or len(query_code) != 6:
                 st.error("❌ 请输入正确的6位股票代码（如 000001、600519）")
@@ -1359,6 +1359,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 

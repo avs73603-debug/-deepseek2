@@ -1325,185 +1325,179 @@ def main():
     
     # ========== Tab3: 自由查询 ==========
     # ========== Tab3: 自由查询 ==========
-   # ========== Tab3: 自由查询 ==========
-with tab3:
-    st.subheader("📅 自由日期查询")
+    # ========== Tab3: 自由查询 ==========
+    with tab3:
+        st.subheader("📅 自由日期查询")
     
-    # 从智能选股页面获取数据
-    filtered_df = st.session_state.get('filtered_df', pd.DataFrame())
-    if filtered_df.empty:
-        st.warning("⚠️ 请先在'智能选股'页面进行一次筛选")
-    else:
-        st.info(f"📊 当前有 {len(filtered_df)} 只筛选后的股票")
-    
-    # 初始化变量
-    start_str = ""
-    end_str = ""
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        query_code = st.text_input("股票代码", "000001", max_chars=6)
-    
-    with col2:
-        start_date = st.date_input("开始", datetime.now(TZ) - timedelta(days=180))
-    
-    with col3:
-        end_date = st.date_input("结束", datetime.now(TZ))
-    
-    if st.button("🔍 查询", type="primary"):
-        # 输入校验
-        if not query_code.isdigit() or len(query_code) != 6:
-            st.error("❌ 请输入正确的6位股票代码（如 000001、600519）")
-            return  # 使用return而不是st.stop()
-        
-        query_code = query_code.zfill(6)
-        
-        start_str = start_date.strftime('%Y%m%d')
-        end_str = end_date.strftime('%Y%m%d')
-        
-        if start_str > end_str:
-            st.error("❌ 开始日期不能晚于结束日期")
-            return
-        
-        with st.spinner(f"正在加载 {query_code} 从 {start_str} 到 {end_str} 的历史数据..."):
-            hist_df = get_stock_history(
-                query_code,
-                start_date=start_str,
-                end_date=end_str
-            )
-        
-        if hist_df.empty:
-            st.error(f"❌ 未找到股票 {query_code} 的历史数据")
-            st.info("可能原因：")
-            st.info("- 股票代码错误")
-            st.info("- 日期范围太长或无交易日")
-            st.info("- 数据源暂时不可用")
-            return
-        
-        # 获取股票名称
-        stock_info = all_stocks[all_stocks['code'] == query_code]
-        stock_name = stock_info['name'].iloc[0] if not stock_info.empty else query_code
-        
-        st.success(f"✅ 成功加载 {stock_name} ({query_code}) 的 {len(hist_df)} 条数据")
-        
-        # 显示统计指标
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("股票名称", stock_name)
-        
-        with col2:
-            # 查找收盘价列（可能是'close'或'收盘'）
-            close_col = None
-            for col in ['close', '收盘', 'close_price']:
-                if col in hist_df.columns:
-                    close_col = col
-                    break
-            
-            if close_col and len(hist_df) >= 2:
-                try:
-                    start_price = pd.to_numeric(hist_df[close_col].iloc[0], errors='coerce')
-                    end_price = pd.to_numeric(hist_df[close_col].iloc[-1], errors='coerce')
-                    if pd.notna(start_price) and pd.notna(end_price) and start_price > 0:
-                        period_return = ((end_price / start_price) - 1) * 100
-                        st.metric("区间涨幅", f"{period_return:.2f}%")
-                    else:
-                        st.metric("区间涨幅", "N/A")
-                except:
-                    st.metric("区间涨幅", "计算失败")
-            else:
-                st.metric("区间涨幅", "N/A")
-        
-        with col3:
-            # 查找最高价列
-            high_col = None
-            for col in ['high', '最高', 'high_price']:
-                if col in hist_df.columns:
-                    high_col = col
-                    break
-            
-            if high_col:
-                try:
-                    max_high = pd.to_numeric(hist_df[high_col], errors='coerce').max()
-                    if pd.notna(max_high):
-                        st.metric("最高价", f"¥{max_high:.2f}")
-                    else:
-                        st.metric("最高价", "N/A")
-                except:
-                    st.metric("最高价", "N/A")
-            else:
-                st.metric("最高价", "N/A")
-        
-        with col4:
-            # 查找最低价列
-            low_col = None
-            for col in ['low', '最低', 'low_price']:
-                if col in hist_df.columns:
-                    low_col = col
-                    break
-            
-            if low_col:
-                try:
-                    min_low = pd.to_numeric(hist_df[low_col], errors='coerce').min()
-                    if pd.notna(min_low):
-                        st.metric("最低价", f"¥{min_low:.2f}")
-                    else:
-                        st.metric("最低价", "N/A")
-                except:
-                    st.metric("最低价", "N/A")
-            else:
-                st.metric("最低价", "N/A")
-        
-        # K线图
-        st.markdown("### 📈 K线图")
-        fig = plot_kline(query_code, stock_name, start_str, end_str)
-        st.plotly_chart(fig, use_container_width=True, key=f"free_query_kline_{query_code}")
-        
-        # 数据表格
-        st.markdown("### 📊 历史数据")
-        
-        if not hist_df.empty:
-            # 调试：先显示原始列名
-            st.caption(f"原始数据列名: {', '.join(hist_df.columns)}")
-            
-            # 标准化列名
-            display_df = hist_df.copy()
-            
-            # 查找日期列
-            date_col = None
-            for col in ['date', '日期', 'trade_date', 'time']:
-                if col in display_df.columns:
-                    date_col = col
-                    break
-            
-            if date_col:
-                try:
-                    display_df['日期'] = pd.to_datetime(display_df[date_col]).dt.strftime('%Y-%m-%d')
-                except:
-                    display_df['日期'] = display_df[date_col].astype(str)
-            else:
-                display_df['日期'] = [f"第{i+1}天" for i in range(len(display_df))]
-            
-            # 显示数据
-            st.dataframe(display_df.tail(50).reset_index(drop=True), 
-                        use_container_width=True,
-                        height=400)
-            
-            # 下载功能
-            csv_data = display_df.to_csv(index=False, encoding='utf-8-sig')
-            st.download_button(
-                "⬇️ 下载CSV数据",
-                csv_data,
-                f"{query_code}_{stock_name}_{start_str}_{end_str}.csv",
-                "text/csv",
-                key=f"download_{query_code}"
-            )
+        #    从智能选股页面获取数据
+        filtered_df = st.session_state.get('filtered_df', pd.DataFrame())
+        if filtered_df.empty:
+            st.warning("⚠️ 请先在'智能选股'页面进行一次筛选")
         else:
-            st.warning("没有可显示的数据")
+            st.info(f"📊 当前有 {len(filtered_df)} 只筛选后的股票")
+    
+        col1, col2, col3 = st.columns(3)
+    
+        with col1:
+            query_code = st.text_input("股票代码", "000001", max_chars=6, key="query_code_input")
+    
+        with col2:
+            start_date = st.date_input("开始", datetime.now(TZ) - timedelta(days=180), key="start_date_input")
+    
+        with col3:
+            end_date = st.date_input("结束", datetime.now(TZ), key="end_date_input")
+    
+        query_btn = st.button("🔍 查询", type="primary", key="query_button")
+    
+        if query_btn:
+            # 输入校验
+            if not query_code or not query_code.isdigit() or len(query_code) != 6:
+                st.error("❌ 请输入正确的6位股票代码（如 000001、600519）")
+            else:
+                query_code = query_code.zfill(6)
+            
+                start_str = start_date.strftime('%Y%m%d')
+                end_str = end_date.strftime('%Y%m%d')
+            
+                if start_str > end_str:
+                    st.error("❌ 开始日期不能晚于结束日期")
+                else:
+                    with st.spinner(f"正在加载 {query_code} 从 {start_str} 到 {end_str} 的历史数据..."):
+                        hist_df = get_stock_history(
+                            query_code,
+                            start_date=start_str,
+                            end_date=end_str
+                        )
+                
+                    if hist_df.empty:
+                        st.error(f"❌ 未找到股票 {query_code} 的历史数据")
+                        st.info("可能原因：")
+                        st.info("- 股票代码错误")
+                        st.info("- 日期范围太长或无交易日")
+                        st.info("- 数据源暂时不可用")
+                    else:
+                        # 获取股票名称
+                        stock_info = all_stocks[all_stocks['code'] == query_code]
+                        stock_name = stock_info['name'].iloc[0] if not stock_info.empty else query_code
+                    
+                        st.success(f"✅ 成功加载 {stock_name} ({query_code}) 的 {len(hist_df)} 条数据")
+                    
+                        # 显示统计指标
+                        cols = st.columns(4)
+                        with cols[0]:
+                            st.metric("股票名称", stock_name)
+                    
+                        with cols[1]:
+                            # 查找收盘价列
+                            close_col = None
+                            for col in ['close', '收盘', 'close_price']:
+                                if col in hist_df.columns:
+                                    close_col = col
+                                    break
+                        
+                            if close_col and len(hist_df) >= 2:
+                                try:
+                                    start_price = pd.to_numeric(hist_df[close_col].iloc[0], errors='coerce')
+                                    end_price = pd.to_numeric(hist_df[close_col].iloc[-1], errors='coerce')
+                                    if pd.notna(start_price) and pd.notna(end_price) and start_price > 0:
+                                        period_return = ((end_price / start_price) - 1) * 100
+                                        st.metric("区间涨幅", f"{period_return:.2f}%")
+                                    else:
+                                        st.metric("区间涨幅", "N/A")
+                                except:
+                                    st.metric("区间涨幅", "计算失败")
+                            else:
+                                st.metric("区间涨幅", "N/A")
+                    
+                        with cols[2]:
+                            # 查找最高价列
+                            high_col = None
+                            for col in ['high', '最高', 'high_price']:
+                                if col in hist_df.columns:
+                                    high_col = col
+                                    break
+                        
+                            if high_col:
+                                try:
+                                    max_high = pd.to_numeric(hist_df[high_col], errors='coerce').max()
+                                    if pd.notna(max_high):
+                                        st.metric("最高价", f"¥{max_high:.2f}")
+                                    else:
+                                        st.metric("最高价", "N/A")
+                                except:
+                                    st.metric("最高价", "N/A")
+                            else:
+                                st.metric("最高价", "N/A")
+                    
+                        with cols[3]:
+                            # 查找最低价列
+                            low_col = None
+                            for col in ['low', '最低', 'low_price']:
+                                if col in hist_df.columns:
+                                    low_col = col
+                                    break
+                        
+                            if low_col:
+                                try:
+                                    min_low = pd.to_numeric(hist_df[low_col], errors='coerce').min()
+                                    if pd.notna(min_low):
+                                        st.metric("最低价", f"¥{min_low:.2f}")
+                                    else:
+                                        st.metric("最低价", "N/A")
+                                except:
+                                    st.metric("最低价", "N/A")
+                            else:
+                                st.metric("最低价", "N/A")
+                    
+                        # K线图
+                        st.markdown("### 📈 K线图")
+                        fig = plot_kline(query_code, stock_name, start_str, end_str)
+                        st.plotly_chart(fig, use_container_width=True, key=f"free_query_kline_{query_code}")
+                    
+                        # 数据表格
+                        st.markdown("### 📊 历史数据")
+                    
+                        if not hist_df.empty:
+                            # 调试：显示原始列名
+                            st.caption(f"原始数据列名: {', '.join(hist_df.columns)}")
+                        
+                            # 标准化列名
+                            display_df = hist_df.copy()
+                        
+                            # 查找日期列
+                            date_col = None
+                            for col in ['date', '日期', 'trade_date', 'time']:
+                                if col in display_df.columns:
+                                    date_col = col
+                                    break
+                        
+                            if date_col:
+                                try:
+                                    display_df['日期'] = pd.to_datetime(display_df[date_col]).dt.strftime('%Y-%m-%d')
+                                except:
+                                    display_df['日期'] = display_df[date_col].astype(str)
+                            else:
+                                display_df['日期'] = [f"第{i+1}天" for i in range(len(display_df))]
+                        
+                            # 显示数据
+                            st.dataframe(display_df.tail(50).reset_index(drop=True), 
+                                        use_container_width=True,
+                                        height=400)
+                        
+                            # 下载功能
+                            csv_data = display_df.to_csv(index=False, encoding='utf-8-sig')
+                            st.download_button(
+                                "⬇️ 下载CSV数据",
+                                csv_data,
+                                f"{query_code}_{stock_name}_{start_str}_{end_str}.csv",
+                                "text/csv",
+                                key=f"download_{query_code}"
+                            )
                
 
 if __name__ == "__main__":
     main()
+
 
 
 

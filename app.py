@@ -1325,41 +1325,46 @@ def main():
     
     # ========== Tab3: 自由查询 ==========
     # ========== Tab3: 自由查询 ==========
-    with tab3:
-        st.subheader("📅 自由日期查询")
+   # ========== Tab3: 自由查询 ==========
+with tab3:
+    st.subheader("📅 自由日期查询")
     
-        # 从智能选股页面获取数据
-        filtered_df = st.session_state.get('filtered_df', pd.DataFrame())
-        if filtered_df.empty:
-            st.warning("⚠️ 请先在'智能选股'页面进行一次筛选")
-        else:
-            st.info(f"📊 当前有 {len(filtered_df)} 只筛选后的股票")
+    # 从智能选股页面获取数据
+    filtered_df = st.session_state.get('filtered_df', pd.DataFrame())
+    if filtered_df.empty:
+        st.warning("⚠️ 请先在'智能选股'页面进行一次筛选")
+    else:
+        st.info(f"📊 当前有 {len(filtered_df)} 只筛选后的股票")
     
-        col1, col2, col3 = st.columns(3)
+    # 初始化变量
+    start_str = ""
+    end_str = ""
     
-        with col1:
-            query_code = st.text_input("股票代码", "000001", max_chars=6)
+    col1, col2, col3 = st.columns(3)
     
-        with col2:
-            start_date = st.date_input("开始", datetime.now(TZ) - timedelta(days=180))
+    with col1:
+        query_code = st.text_input("股票代码", "000001", max_chars=6)
     
-        with col3:
-            end_date = st.date_input("结束", datetime.now(TZ))
+    with col2:
+        start_date = st.date_input("开始", datetime.now(TZ) - timedelta(days=180))
     
-        if st.button("🔍 查询", type="primary"):
-            # 输入校验
-            if not query_code.isdigit() or len(query_code) != 6:
-                st.error("❌ 请输入正确的6位股票代码（如 000001、600519）")
-                st.stop()
+    with col3:
+        end_date = st.date_input("结束", datetime.now(TZ))
+    
+    if st.button("🔍 查询", type="primary"):
+        # 输入校验
+        if not query_code.isdigit() or len(query_code) != 6:
+            st.error("❌ 请输入正确的6位股票代码（如 000001、600519）")
+            return  # 使用return而不是st.stop()
         
-            query_code = query_code.zfill(6)
+        query_code = query_code.zfill(6)
         
-            start_str = start_date.strftime('%Y%m%d')
-            end_str = end_date.strftime('%Y%m%d')
+        start_str = start_date.strftime('%Y%m%d')
+        end_str = end_date.strftime('%Y%m%d')
         
         if start_str > end_str:
             st.error("❌ 开始日期不能晚于结束日期")
-            st.stop()
+            return
         
         with st.spinner(f"正在加载 {query_code} 从 {start_str} 到 {end_str} 的历史数据..."):
             hist_df = get_stock_history(
@@ -1374,7 +1379,7 @@ def main():
             st.info("- 股票代码错误")
             st.info("- 日期范围太长或无交易日")
             st.info("- 数据源暂时不可用")
-            st.stop()
+            return
         
         # 获取股票名称
         stock_info = all_stocks[all_stocks['code'] == query_code]
@@ -1454,14 +1459,14 @@ def main():
         fig = plot_kline(query_code, stock_name, start_str, end_str)
         st.plotly_chart(fig, use_container_width=True, key=f"free_query_kline_{query_code}")
         
-        # 数据表格（防御性处理列名）
+        # 数据表格
         st.markdown("### 📊 历史数据")
         
         if not hist_df.empty:
             # 调试：先显示原始列名
             st.caption(f"原始数据列名: {', '.join(hist_df.columns)}")
             
-            # 标准化列名（适配akshare不同接口）
+            # 标准化列名
             display_df = hist_df.copy()
             
             # 查找日期列
@@ -1472,78 +1477,34 @@ def main():
                     break
             
             if date_col:
-                # 尝试转换为日期格式
                 try:
                     display_df['日期'] = pd.to_datetime(display_df[date_col]).dt.strftime('%Y-%m-%d')
                 except:
                     display_df['日期'] = display_df[date_col].astype(str)
             else:
-                # 如果没有日期列，创建序号
                 display_df['日期'] = [f"第{i+1}天" for i in range(len(display_df))]
             
-            # 查找并重命名其他列
-            column_mapping = {}
-            possible_mappings = {
-                '开盘': ['open', 'open_price', '今开'],
-                '收盘': ['close', 'close_price', '今收', 'current'],
-                '最高': ['high', 'high_price', '最高价'],
-                '最低': ['low', 'low_price', '最低价'],
-                '成交量': ['volume', '成交量', '成交手数', 'amount'],
-                '涨跌幅': ['pct_chg', '涨跌幅', 'change_pct', 'chg_pct']
-            }
+            # 显示数据
+            st.dataframe(display_df.tail(50).reset_index(drop=True), 
+                        use_container_width=True,
+                        height=400)
             
-            for display_name, possible_names in possible_mappings.items():
-                for name in possible_names:
-                    if name in display_df.columns and display_name not in column_mapping:
-                        column_mapping[display_name] = name
-            
-            # 只显示存在的列
-            available_columns = ['日期']  # 日期列始终显示
-            rename_dict = {}
-            
-            for display_name, original_name in column_mapping.items():
-                if original_name in display_df.columns:
-                    available_columns.append(display_name)
-                    rename_dict[original_name] = display_name
-            
-            # 重命名列
-            if rename_dict:
-                display_df = display_df.rename(columns=rename_dict)
-            
-            # 选择要显示的列
-            display_columns = [col for col in available_columns if col in display_df.columns]
-            
-            if display_columns:
-                # 确保数据类型正确
-                for col in display_columns:
-                    if col != '日期':
-                        display_df[col] = pd.to_numeric(display_df[col], errors='coerce')
-                
-                # 显示最近50条数据
-                st.dataframe(
-                    display_df[display_columns].tail(50).reset_index(drop=True),
-                    use_container_width=True,
-                    height=400
-                )
-                
-                # 下载功能
-                csv_data = display_df[display_columns].to_csv(index=False, encoding='utf-8-sig')
-                st.download_button(
-                    "⬇️ 下载CSV数据",
-                    csv_data,
-                    f"{query_code}_{stock_name}_{start_str}_{end_str}.csv",
-                    "text/csv",
-                    key=f"download_{query_code}"
-                )
-            else:
-                st.warning("无法识别数据列格式，显示原始数据：")
-                st.dataframe(hist_df.tail(20))
+            # 下载功能
+            csv_data = display_df.to_csv(index=False, encoding='utf-8-sig')
+            st.download_button(
+                "⬇️ 下载CSV数据",
+                csv_data,
+                f"{query_code}_{stock_name}_{start_str}_{end_str}.csv",
+                "text/csv",
+                key=f"download_{query_code}"
+            )
         else:
             st.warning("没有可显示的数据")
                
 
 if __name__ == "__main__":
     main()
+
 
 
 

@@ -1248,21 +1248,23 @@ def main():
         with col2:
             st.markdown("### 结果")
             
-            if g_results:
-                st.success(f"发现 {len(g_results)} 只")
-                
-                for symbol, signals in list(g_results.items())[:20]:
-                    stock = filtered_df[filtered_df['code'] == symbol]
+                if g_results:
+                    st.success(f"发现 {len(g_results)} 只命中G信号")
+                    
+                    for symbol, signals in list(g_results.items())[:20]:
+                        stock = filtered_df[filtered_df['code'] == symbol]
+                        badges = " ".join([f"【{s}】" for s in signals])
+                        
                         if not stock.empty:
                             row = stock.iloc[0]
-                            badges = " ".join([f"【{s}】" for s in signals])
-                            st.markdown(f"**{row['name']}({symbol})** {badges}")
-                            st.text(f"¥{row['price']:.2f} | {row['pct_chg']:.2f}%")
-                            st.markdown("---")
+                            st.markdown(f"**{row['name']} ({symbol})** {badges}")
+                            st.text(f"价格: ¥{row['price']:.2f} | 涨幅: {row['pct_chg']:.2f}% | 市值: {row['float_mv']/100000000:.2f}亿")
                         else:
-                            st.markdown(f"**{symbol}** {' '.join([f'【{s}】' for s in signals])} （未在当前筛选结果中）")
-            else:
-                st.warning("暂无命中")
+                            # 即使不在当前筛选里，也显示代码和信号
+                            st.markdown(f"**{symbol}** {badges} （未进入当前筛选榜单）")
+                        st.markdown("---")
+                else:
+                    st.info("暂无股票命中已启用的G信号")
     
     # ========== Tab3: 自由查询 ==========
     with tab3:
@@ -1315,5 +1317,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 

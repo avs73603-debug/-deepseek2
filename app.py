@@ -1215,7 +1215,7 @@ def main():
             
             with col2:
                 fig = plot_kline(row['code'], row['name'])
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_container_width=True, key=f"kline_{row['code']}")
             
             st.markdown("</div>", unsafe_allow_html=True)
     
@@ -1308,7 +1308,7 @@ def main():
                         st.metric("最高", f"¥{hist_df['high'].max():.2f}")
                     
                     fig = plot_kline(query_code, stock_name, start_str, end_str)
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, use_container_width=True, key=f"query_kline_{query_code}")
                 else:
                     st.error("❌ 无数据")
             else:
@@ -1316,6 +1316,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 

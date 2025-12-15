@@ -298,12 +298,18 @@ def get_stock_hot_rank():
 # 技术指标计算（完整版：14个指标）
 # ============================================================
 def calculate_ma(df, periods=[5, 10, 20, 60]):
-    if df.empty:
-        return df
+    if df.empty or 'close' not in df.columns:
+        return df  # 直接返回，避免崩溃
+    
     df = df.copy()
+    # 确保 close 是数值型
+    df['close'] = pd.to_numeric(df['close'], errors='coerce')
+    
     for p in periods:
-        if len(df) >= p:
+        if len(df) >= p and 'close' in df.columns:
             df[f'ma{p}'] = df['close'].rolling(window=p).mean()
+        else:
+            df[f'ma{p}'] = np.nan  # 数据不足时填空
     return df
 
 def calculate_macd(df, short=12, long=26, signal=9):
@@ -887,44 +893,72 @@ def render_stocks_with_pagination(df, page_size=10):
 # ============================================================
 def plot_kline(symbol, name, start_date=None, end_date=None):
     df = get_stock_history(symbol, start_date=start_date, end_date=end_date)
-    
-    if df.empty:
+   
+    if df.empty or 'close' not in df.columns:
         fig = go.Figure()
-        fig.add_annotation(text="暂无数据", x=0.5, y=0.5, showarrow=False)
+        fig.add_annotation(
+            text=f"暂无股票 {symbol} {name} 的有效数据<br>可能原因：代码错误 / 数据源暂不可用",
+            xref="paper", yref="paper",
+            x=0.5, y=0.5, showarrow=False,
+            font_size=16
+        )
+        fig.update_layout(height=600, template='plotly_white')
         return fig
+   
+    # 防御：确保必要列存在并转为数值
+    required_cols = ['open', 'high', 'low', 'close', 'volume']
+    for col in required_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+        else:
+            df[col] = np.nan
     
     df = calculate_ma(df)
     df = calculate_macd(df)
-    
+   
     fig = make_subplots(
         rows=2, cols=1,
         row_heights=[0.7, 0.3],
-        subplot_titles=(f'{name}({symbol})', 'MACD')
+        subplot_titles=(f'{name}({symbol}) K线图', 'MACD')
     )
-    
+   
+    # K线（红涨绿跌）
     fig.add_trace(go.Candlestick(
-        x=df['date'], open=df['open'], high=df['high'],
-        low=df['low'], close=df['close'],
-        increasing_line_color='red', decreasing_line_color='green'
+        x=df['date'],
+        open=df['open'],
+        high=df['high'],
+        low=df['low'],
+        close=df['close'],
+        increasing_line_color='red',
+        decreasing_line_color='green',
+        name="K线"
     ), row=1, col=1)
-    
-    for p, color in [(5, 'orange'), (10, 'blue'), (20, 'purple')]:
+   
+    # 均线
+    colors = ['orange', 'blue', 'purple', 'gray']
+    for i, p in enumerate([5, 10, 20, 60]):
         if f'ma{p}' in df.columns:
             fig.add_trace(go.Scatter(
                 x=df['date'], y=df[f'ma{p}'],
                 mode='lines', name=f'MA{p}',
-                line=dict(color=color, width=1)
+                line=dict(color=colors[i % len(colors)], width=2)
             ), row=1, col=1)
-    
-    if 'macd' in df.columns:
+   
+    # MACD
+    if 'macd' in df.columns and not df['macd'].isna().all():
         fig.add_trace(go.Bar(
             x=df['date'], y=df['macd'],
-            marker_color=['red' if x > 0 else 'green' for x in df['macd']]
+            marker_color=np.where(df['macd'] > 0, 'red', 'green'),
+            name="MACD"
         ), row=2, col=1)
-    
-    fig.update_layout(height=600, template='plotly_white', xaxis_rangeslider_visible=False)
+   
+    fig.update_layout(
+        height=600,
+        template='plotly_white',
+        xaxis_rangeslider_visible=False,
+        title_text=f"{name} ({symbol})"
+    )
     return fig
-
 # ============================================================
 # AI助手
 # ============================================================
@@ -1382,6 +1416,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 

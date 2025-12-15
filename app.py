@@ -1248,7 +1248,7 @@ def main():
         with col2:
             st.markdown("### 结果")
             
-                if g_results:
+            if g_results:
                     st.success(f"发现 {len(g_results)} 只命中G信号")
                     
                     for symbol, signals in list(g_results.items())[:20]:
@@ -1263,7 +1263,7 @@ def main():
                             # 即使不在当前筛选里，也显示代码和信号
                             st.markdown(f"**{symbol}** {badges} （未进入当前筛选榜单）")
                         st.markdown("---")
-                else:
+            else:
                     st.info("暂无股票命中已启用的G信号")
     
     # ========== Tab3: 自由查询 ==========
@@ -1317,6 +1317,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 

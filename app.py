@@ -1325,37 +1325,37 @@ def main():
     
     # ========== Tab3: 自由查询 ==========
     # ========== Tab3: 自由查询 ==========
-with tab3:
-    st.subheader("📅 自由日期查询")
+    with tab3:
+        st.subheader("📅 自由日期查询")
     
-    # 从智能选股页面获取数据
-    filtered_df = st.session_state.get('filtered_df', pd.DataFrame())
-    if filtered_df.empty:
-        st.warning("⚠️ 请先在'智能选股'页面进行一次筛选")
-    else:
-        st.info(f"📊 当前有 {len(filtered_df)} 只筛选后的股票")
+        # 从智能选股页面获取数据
+        filtered_df = st.session_state.get('filtered_df', pd.DataFrame())
+        if filtered_df.empty:
+            st.warning("⚠️ 请先在'智能选股'页面进行一次筛选")
+        else:
+            st.info(f"📊 当前有 {len(filtered_df)} 只筛选后的股票")
     
-    col1, col2, col3 = st.columns(3)
+        col1, col2, col3 = st.columns(3)
     
-    with col1:
-        query_code = st.text_input("股票代码", "000001", max_chars=6)
+        with col1:
+            query_code = st.text_input("股票代码", "000001", max_chars=6)
     
-    with col2:
-        start_date = st.date_input("开始", datetime.now(TZ) - timedelta(days=180))
+        with col2:
+            start_date = st.date_input("开始", datetime.now(TZ) - timedelta(days=180))
     
-    with col3:
-        end_date = st.date_input("结束", datetime.now(TZ))
+        with col3:
+            end_date = st.date_input("结束", datetime.now(TZ))
     
-    if st.button("🔍 查询", type="primary"):
-        # 输入校验
-        if not query_code.isdigit() or len(query_code) != 6:
-            st.error("❌ 请输入正确的6位股票代码（如 000001、600519）")
-            st.stop()
+        if st.button("🔍 查询", type="primary"):
+            # 输入校验
+            if not query_code.isdigit() or len(query_code) != 6:
+                st.error("❌ 请输入正确的6位股票代码（如 000001、600519）")
+                st.stop()
         
-        query_code = query_code.zfill(6)
+            query_code = query_code.zfill(6)
         
-        start_str = start_date.strftime('%Y%m%d')
-        end_str = end_date.strftime('%Y%m%d')
+            start_str = start_date.strftime('%Y%m%d')
+            end_str = end_date.strftime('%Y%m%d')
         
         if start_str > end_str:
             st.error("❌ 开始日期不能晚于结束日期")
@@ -1544,6 +1544,7 @@ with tab3:
 
 if __name__ == "__main__":
     main()
+
 
 
 
